@@ -1,3 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_bg">#FF8A50</color>
+    <color name="cf_bg">#0E1013</color>
+    <color name="cf_surface">#171A21</color>
+    <color name="cf_surface_var">#20242E</color>
+    <color name="cf_stroke">#2A2F3A</color>
+    <color name="cf_primary">#FF8A3D</color>
+    <color name="cf_on_primary">#201205</color>
+    <color name="cf_danger">#FF5252</color>
+    <color name="cf_warn">#FFB300</color>
+    <color name="cf_ok">#4ADE80</color>
+    <color name="cf_text">#E8EAED</color>
+    <color name="cf_text_dim">#9AA0A6</color>
 </resources>

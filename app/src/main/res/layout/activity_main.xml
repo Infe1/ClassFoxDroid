@@ -1,167 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#FFF8F0"
-    android:fillViewport="true">
+    android:background="@color/cf_bg"
+    android:orientation="vertical">
 
-    <LinearLayout
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:background="@color/cf_surface"
+        app:title="课狐 ClassFox"
+        app:titleTextColor="@color/cf_text" />
+
+    <FrameLayout
+        android:id="@+id/container"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottomNav"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="20dp">
-
-        <TextView
-            android:id="@+id/tvTitle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="🦊 课狐 ClassFox · 移动端试听"
-            android:textColor="#5D4037"
-            android:textSize="20sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/tvStatus"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="⚪ 未监听"
-            android:textColor="#6D4C41"
-            android:textSize="15sp" />
-
-        <TextView
-            android:id="@+id/tvDb"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="-90 dB"
-            android:textColor="#33691E"
-            android:textSize="26sp"
-            android:textStyle="bold" />
-
-        <ProgressBar
-            android:id="@+id/volumeBar"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="18dp"
-            android:layout_marginTop="4dp"
-            android:max="100"
-            android:progress="0"
-            android:progressTint="#66BB6A"
-            android:progressBackgroundTint="#E0E0E0" />
-
-        <TextView
-            android:id="@+id/tvTime"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="已监听 00:00"
-            android:textColor="#795548"
-            android:textSize="13sp" />
-
-        <TextView
-            android:id="@+id/tvThreshold"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="人声事件阈值：-30 dB（只记录高于此值的声音）"
-            android:textColor="#6D4C41"
-            android:textSize="12sp" />
-
-        <SeekBar
-            android:id="@+id/thresholdSeek"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:max="50"
-            android:progress="30" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:orientation="horizontal">
-
-            <Button
-                android:id="@+id/btnStart"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="开始监听"
-                android:textColor="#FFFFFF"
-                android:backgroundTint="#43A047" />
-
-            <Button
-                android:id="@+id/btnPause"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:layout_weight="0.7"
-                android:text="暂停"
-                android:enabled="false"
-                android:textColor="#FFFFFF"
-                android:backgroundTint="#FB8C00" />
-
-            <Button
-                android:id="@+id/btnStop"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
-                android:layout_weight="1"
-                android:text="停止"
-                android:enabled="false"
-                android:textColor="#FFFFFF"
-                android:backgroundTint="#E53935" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/tvFile"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="录音文件: —"
-            android:textColor="#8D6E63"
-            android:textSize="12sp" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="实时事件"
-            android:textColor="#4E342E"
-            android:textSize="14sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/tvCaption"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:minHeight="48dp"
-            android:background="#FFF3E0"
-            android:padding="10dp"
-            android:text="实时字幕将在这里显示…"
-            android:textColor="#3E2723"
-            android:textSize="16sp"
-            android:maxLines="3" />
-
-        <TextView
-            android:id="@+id/tvLog"
-            android:layout_width="match_parent"
-            android:layout_height="240dp"
-            android:layout_marginTop="6dp"
-            android:background="#FBE9E7"
-            android:fontFamily="monospace"
-            android:padding="10dp"
-            android:text="等待启动…\n"
-            android:textColor="#4E342E"
-            android:textSize="12sp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:text="说明: 当前版本为纯安卓链路——16kHz 录音 + 端侧离线中文 ASR + 自动分句 + WAV 落盘。\n识别结果会经过分句和关键词检测；不会读取旧版本的转录数据。"
-            android:textColor="#A1887F"
-            android:textSize="12sp" />
-    </LinearLayout>
-</ScrollView>
+        android:background="@color/cf_surface"
+        app:itemActiveIndicatorStyle="@style/CFNavIndicator"
+        app:itemIconTint="@color/bottom_nav_item"
+        app:itemTextColor="@color/bottom_nav_item"
+        app:labelVisibilityMode="labeled"
+        app:menu="@menu/bottom_nav" />
+</LinearLayout>

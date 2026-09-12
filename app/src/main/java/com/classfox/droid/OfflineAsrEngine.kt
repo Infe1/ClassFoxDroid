@@ -132,7 +132,6 @@ class OfflineAsrEngine(
     }
 
     private var pendingSamples = 0
-    private var decodeTick = 0
 
     private fun isEndpoint(st: OnlineStream): Boolean {
         return try { recognizer?.isEndpoint(st) == true } catch (_: Throwable) { false }

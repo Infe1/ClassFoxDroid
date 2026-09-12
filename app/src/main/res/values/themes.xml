@@ -1,5 +1,17 @@
 <resources>
-    <style name="Theme.ClassFoxDroid" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="android:statusBarColor">#FFF8F0</item>
+    <style name="Theme.ClassFoxDroid" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/cf_primary</item>
+        <item name="colorOnPrimary">@color/cf_on_primary</item>
+        <item name="colorPrimaryContainer">@color/cf_surface_var</item>
+        <item name="colorOnPrimaryContainer">@color/cf_text</item>
+        <item name="android:colorBackground">@color/cf_bg</item>
+        <item name="colorSurface">@color/cf_surface</item>
+        <item name="colorOnSurface">@color/cf_text</item>
+        <item name="colorSurfaceVariant">@color/cf_surface_var</item>
+        <item name="colorOnSurfaceVariant">@color/cf_text_dim</item>
+        <item name="colorError">@color/cf_danger</item>
+        <item name="android:statusBarColor">@color/cf_bg</item>
+        <item name="android:navigationBarColor">@color/cf_surface</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>
