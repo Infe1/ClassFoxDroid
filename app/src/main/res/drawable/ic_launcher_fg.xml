@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 简化的狐狸脸:橙底圆 + 白口鼻 + 眼睛 -->
+    <path
+        android:fillColor="#FFF3E0"
+        android:pathData="M54,30 a24,24 0 1,0 0.001,0 z" />
+    <path
+        android:fillColor="#4E342E"
+        android:pathData="M46,56 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <path
+        android:fillColor="#4E342E"
+        android:pathData="M62,56 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <path
+        android:fillColor="#D84315"
+        android:pathData="M48,72 h12 v6 h-12 z" />
+</vector>
