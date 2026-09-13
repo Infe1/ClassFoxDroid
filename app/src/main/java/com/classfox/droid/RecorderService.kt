@@ -424,12 +424,9 @@ class RecorderService : Service() {
         sys.start()
         if (sys.running) {
             emit("asr_status", "[系统识别] 已启动（厂商接口 · zh-CN）")
-        } else {
-            // 设备没有系统/厂商语音服务：回退到端侧离线识别，保证链路可用
-            Log.w(TAG, "系统识别不可用，回退离线识别")
-            startOfflineEngine()
-            emit("asr_status", "[系统识别] 不可用，已回退到离线识别")
         }
+        // 不可用时不回退离线：模拟器等无语音服务环境里，离线解码会 native 崩溃；
+        // SystemAsrEngine 已上报明确状态，录音与警报链路照常。
     }
 
     private fun startOfflineEngine() {

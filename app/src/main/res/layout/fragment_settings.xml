@@ -282,6 +282,53 @@
         </com.google.android.material.card.MaterialCardView>
 
         <!-- 关于/数据 -->
+        <!-- 语音自检 -->
+        <com.google.android.material.card.MaterialCardView
+            style="@style/CFCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="真实音频自检"
+                    android:textColor="@color/cf_text"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="选择 16 位 PCM 的 WAV 文件直接喂入离线识别器，验证真实语音的识别与分句效果（不经麦克风）。注意：模拟器环境离线解码可能闪退，真机正常。"
+                    android:textColor="@color/cf_text_dim"
+                    android:textSize="12sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSelfTest"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="选择 WAV 并识别" />
+
+                <TextView
+                    android:id="@+id/tvSelfTest"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="@color/cf_text_dim"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
         <com.google.android.material.card.MaterialCardView
             style="@style/CFCard"
             android:layout_width="match_parent"

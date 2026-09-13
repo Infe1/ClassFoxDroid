@@ -141,9 +141,16 @@ class OfflineAsrEngine(
     fun finish() {
         running = false
         try {
+            val rec = recognizer ?: return
             val st = stream ?: return
+            // 仅在确有待解码内容时冲刷：空冲刷也会触发解码，
+            // 在模拟器翻译层环境会导致 native exit(255)（进程闪退）
+            if (!rec.isReady(st)) {
+                Log.i(TAG, "finish: 无待解码内容，跳过冲刷")
+                return
+            }
             st.inputFinished()
-            recognizer?.decode(st)
+            rec.decode(st)
             val result = recognizer?.getResult(st)?.text?.trim()
             if (!result.isNullOrEmpty()) onText(result, true)
         } catch (e: Throwable) {

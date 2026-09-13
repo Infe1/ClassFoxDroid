@@ -50,7 +50,7 @@ class SystemAsrEngine(
     fun start() {
         if (running) return
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            onStatus("系统识别不可用（此设备没有系统/厂商语音服务），请改用离线识别或模拟识别")
+            onStatus("系统识别不可用（此设备没有系统/厂商语音服务）。录音照常，但不会有字幕；请到设置切换引擎。真机一般自带语音服务，模拟器没有。")
             return
         }
         running = true

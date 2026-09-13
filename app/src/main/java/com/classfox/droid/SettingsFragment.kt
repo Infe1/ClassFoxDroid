@@ -1,11 +1,14 @@
 package com.classfox.droid
 
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.classfox.droid.databinding.FragmentSettingsBinding
@@ -17,6 +20,47 @@ class SettingsFragment : Fragment() {
 
     private var _b: FragmentSettingsBinding? = null
     private val b get() = _b!!
+
+    private val selfTestLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+            if (uri != null) runSelfTest(uri)
+        }
+
+    private fun runSelfTest(uri: Uri) {
+        val tv = b.tvSelfTest
+        tv.visibility = View.VISIBLE
+        tv.text = "准备中…"
+        b.btnSelfTest.isEnabled = false
+        val ctx = requireContext()
+        AudioSelfTest.run(ctx, uri, object : AudioSelfTest.Callbacks {
+            override fun onLog(msg: String) {
+                activity?.runOnUiThread { if (_b != null) tv.append("\n$msg") }
+            }
+
+            override fun onDone(text: String?) {
+                activity?.runOnUiThread {
+                    if (_b == null) return@runOnUiThread
+                    b.btnSelfTest.isEnabled = true
+                    if (text == null) {
+                        tv.append("\n✗ 未完成")
+                    } else {
+                        val dlgTv = EditText(ctx).apply {
+                            setPadding(48, 32, 48, 32)
+                            textSize = 14f
+                            setTextColor(ContextCompat.getColor(ctx, R.color.cf_text))
+                            setText(text)
+                            setTextIsSelectable(true)
+                        }
+                        com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
+                            .setTitle("自检识别结果")
+                            .setView(dlgTv)
+                            .setPositiveButton("关闭", null)
+                            .show()
+                    }
+                }
+            }
+        })
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
@@ -74,6 +118,10 @@ class SettingsFragment : Fragment() {
             Prefs.setThresholdDb(requireContext(), db)
             b.tvThreshold.text = "人声事件阈值：$db dB"
             (activity as? MainActivity)?.service?.setVoiceThreshold(db.toDouble())
+        }
+
+        b.btnSelfTest.setOnClickListener {
+            selfTestLauncher.launch(arrayOf("audio/wav", "audio/x-wav", "audio/*"))
         }
 
         b.btnEditDanger.setOnClickListener { editKeywords(danger = true) }
