@@ -457,6 +457,14 @@
                     android:layout_marginTop="8dp"
                     android:text="选择 WAV 并识别" />
 
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnDiag"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="引擎诊断（离线识别能否初始化）" />
+
                 <TextView
                     android:id="@+id/tvSelfTest"
                     android:layout_width="match_parent"

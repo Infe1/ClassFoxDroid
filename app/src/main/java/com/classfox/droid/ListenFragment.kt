@@ -146,7 +146,12 @@ class ListenFragment : Fragment() {
                 log("[句] $text")
             }
             "sentence_corrected" -> log("[修] $text")
-            "voice", "asr_status", "error" -> log(text)
+            "voice", "error" -> log(text)
+            "asr_status" -> {
+                log(text)
+                // 引擎故障显性化：不再只留在一闪而过的日志里
+                if (text.contains("失败") || text.contains("不可用")) showAlert(text, danger = true)
+            }
             "partial" -> {
                 captionPartial = if (text.isEmpty()) "" else "$text"
                 renderCaption()

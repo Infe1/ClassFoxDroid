@@ -475,21 +475,34 @@ class RecorderService : Service() {
     }
 
     private fun startOfflineEngine() {
-        if (asrEngine == null) {
+        if (asrEngine != null) {
+            emit("asr_status", "离线ASR复用已就绪引擎")
+            return
+        }
+        // 模型解压（首次 160MB+）+ ORT 初始化较慢，移到后台线程，避免冻屏/ANR
+        emit("asr_status", "离线ASR初始化中（首次需解压模型，约几秒到十几秒）…")
+        Thread {
             val engine = OfflineAsrEngine(this) { text, isFinal ->
                 if (text.isNotEmpty()) mainHandler.post { ingestAsrText(text, isFinal) }
             }
-            asrEngine = engine
+            val t0 = System.currentTimeMillis()
             val err = engine.init()
-            if (err != null) {
-                Log.e(TAG, "ASR 不可用: $err")
-                emit("asr_status", "离线ASR不可用: $err")
-                return
+            mainHandler.post {
+                if (!running.get()) {
+                    // 监听已停止：直接释放，不再挂载
+                    try { engine.release() } catch (_: Exception) {}
+                    return@post
+                }
+                asrEngine = engine
+                if (err != null) {
+                    Log.e(TAG, "ASR 不可用: $err")
+                    emit("asr_status", "离线ASR初始化失败: $err")
+                } else {
+                    val secs = (System.currentTimeMillis() - t0) / 1000
+                    emit("asr_status", "离线ASR已就绪（初始化耗时 ${secs} 秒）")
+                }
             }
-            emit("asr_status", "离线ASR已就绪(流式中文)")
-        } else {
-            emit("asr_status", "离线ASR复用已就绪引擎")
-        }
+        }.apply { name = "classfox-asr-init" }.start()
     }
 
     private fun processChunk(buf: ShortArray, n: Int) {

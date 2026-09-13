@@ -49,19 +49,40 @@ class SystemAsrEngine(
 
     fun start() {
         if (running) return
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            onStatus("系统识别不可用（此设备没有系统/厂商语音服务）。录音照常，但不会有字幕；请到设置切换引擎。真机一般自带语音服务，模拟器没有。")
-            return
+        if (SpeechRecognizer.isRecognitionAvailable(context)) {
+            createAndStart(false)
+        } else if (android.os.Build.VERSION.SDK_INT >= 29) {
+            // 部分国产 ROM 云端识别服务被裁剪，但保留端侧识别服务
+            try {
+                createAndStart(true)
+            } catch (e: Exception) {
+                Log.w(TAG, "端侧识别服务创建失败", e)
+                reportUnavailable()
+            }
+        } else {
+            reportUnavailable()
         }
+    }
+
+    private fun createAndStart(onDevice: Boolean) {
         running = true
         consecutiveErrors = 0
         failureTimestamps.clear()
-        // createSpeechRecognizer 要求主线程；service 的 startRecording 本就在主线程
-        recognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
-            setRecognitionListener(listener)
-        }
-        Log.i(TAG, "系统识别启动（厂商接口）")
+        recognizer = if (onDevice) {
+            SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+        } else {
+            SpeechRecognizer.createSpeechRecognizer(context)
+        }?.apply { setRecognitionListener(listener) }
+        Log.i(TAG, "系统识别启动（厂商接口, onDevice=$onDevice）")
+        onStatus(if (onDevice) "[系统识别] 已启动（厂商端侧服务 · zh-CN）" else "[系统识别] 已启动（厂商接口 · zh-CN）")
         startListening()
+    }
+
+    private fun reportUnavailable() {
+        onStatus(
+            "系统识别不可用：此设备没有可用的系统/厂商语音服务（部分 vivo/OPPO 等机型需在系统设置里开启语音助手相关服务）。" +
+            "录音照常但没有字幕——请改用「离线识别」引擎，效果不受影响。"
+        )
     }
 
     fun setPaused(p: Boolean) {

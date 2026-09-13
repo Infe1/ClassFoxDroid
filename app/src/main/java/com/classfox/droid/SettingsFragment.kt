@@ -26,6 +26,30 @@ class SettingsFragment : Fragment() {
             if (uri != null) runSelfTest(uri)
         }
 
+    /** 离线识别引擎初始化诊断：真机上"没有字幕"时用它定位 */
+    private fun runEngineDiag() {
+        val tv = b.tvSelfTest
+        tv.visibility = View.VISIBLE
+        tv.text = "诊断中：解压并初始化离线识别模型（首次约几秒到十几秒）…"
+        b.btnDiag.isEnabled = false
+        val ctx = requireContext().applicationContext
+        Thread {
+            val engine = OfflineAsrEngine(ctx) { _, _ -> }
+            val t0 = System.currentTimeMillis()
+            val err = engine.init()
+            val secs = (System.currentTimeMillis() - t0) / 1000.0
+            try { engine.release() } catch (_: Exception) {}
+            activity?.runOnUiThread {
+                if (_b == null) return@runOnUiThread
+                b.btnDiag.isEnabled = true
+                tv.text = if (err == null)
+                    "✓ 引擎正常：初始化成功，耗时 ${"%.1f".format(secs)} 秒。实时监听应能出字幕；若仍无字幕，请确认监听时周围有说话声。"
+                else
+                    "✗ 引擎异常：$err\n请把这段文字发给开发者。"
+            }
+        }.apply { name = "classfox-diag" }.start()
+    }
+
     private fun runSelfTest(uri: Uri) {
         val tv = b.tvSelfTest
         tv.visibility = View.VISIBLE
@@ -147,6 +171,7 @@ class SettingsFragment : Fragment() {
         b.etLlmKey.addTextChangedListener(saveWatcher(saveLlm))
         b.etLlmModel.addTextChangedListener(saveWatcher(saveLlm))
 
+        b.btnDiag.setOnClickListener { runEngineDiag() }
         b.btnSelfTest.setOnClickListener {
             selfTestLauncher.launch(arrayOf("audio/wav", "audio/x-wav", "audio/*"))
         }
