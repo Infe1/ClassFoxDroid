@@ -120,6 +120,19 @@ class SettingsFragment : Fragment() {
             (activity as? MainActivity)?.service?.setVoiceThreshold(db.toDouble())
         }
 
+        b.toggleModel.check(
+            if (Prefs.asrModel(requireContext()) == Prefs.MODEL_SMALL)
+                R.id.btnModelSmall else R.id.btnModelLarge
+        )
+        b.toggleModel.addOnButtonCheckedListener { _, _, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            val m =
+                if (b.toggleModel.checkedButtonId == R.id.btnModelSmall) Prefs.MODEL_SMALL
+                else Prefs.MODEL_LARGE
+            Prefs.setAsrModel(requireContext(), m)
+            Toast.makeText(requireContext(), "已切换模型，下次开始监听时生效", Toast.LENGTH_SHORT).show()
+        }
+
         b.btnSelfTest.setOnClickListener {
             selfTestLauncher.launch(arrayOf("audio/wav", "audio/x-wav", "audio/*"))
         }

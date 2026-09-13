@@ -34,10 +34,13 @@ object AudioSelfTest {
                 cb.onLog("音频 ${"%.1f".format(pcm.size / TARGET_RATE.toFloat())} 秒，识别中…")
                 Log.i(TAG, "自检开始: ${pcm.size} samples")
 
+                // 与监听服务同一条链路：endpoint final → 分句器 → 定稿句
+                val splitter = SentenceSplitter()
                 val sb = StringBuilder()
                 engine = OfflineAsrEngine(context.applicationContext) { text, isFinal ->
-                    if (isFinal) synchronized(sb) { sb.append(text) }
-                    else cb.onLog("…$text")
+                    if (isFinal) synchronized(sb) {
+                        for (s in splitter.feed(text)) sb.append(s).append('\n')
+                    } else cb.onLog("…$text")
                 }
                 val err = engine.init()
                 if (err != null) {
@@ -58,6 +61,10 @@ object AudioSelfTest {
                     Thread.sleep(30)
                 }
                 engine.finish()
+                // 收尾：分句器里可能还有未闭合的半句
+                synchronized(sb) {
+                    for (s in splitter.flushRemaining()) sb.append(s).append('\n')
+                }
                 engine.release()
                 engine = null
 

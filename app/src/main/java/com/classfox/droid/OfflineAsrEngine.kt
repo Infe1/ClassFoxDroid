@@ -21,10 +21,26 @@ class OfflineAsrEngine(
     companion object {
         private const val TAG = "ClassFoxAsr"
         private const val SAMPLE_RATE = 16000
-        private const val ASSET_DIR = "zh14m"
-        private const val MODEL_NAME = "sherpa-onnx-streaming-zipformer-zh-14M-int8"
         private const val FEATHER = 0.1f // 每次喂入块时长(秒) → 100ms
+
+        // 两套内置模型：小=体积小但真实语音精度差；大=encoder 153MB，精度高
+        private data class ModelSpec(
+            val assetDir: String, val dirName: String,
+            val encoder: String, val decoder: String, val joiner: String
+        )
+        private val MODEL_SMALL = ModelSpec(
+            "zh14m", "sherpa-onnx-streaming-zipformer-zh-14M-int8",
+            "encoder-epoch-99-avg-1.int8.onnx", "decoder-epoch-99-avg-1.int8.onnx",
+            "joiner-epoch-99-avg-1.int8.onnx"
+        )
+        private val MODEL_LARGE = ModelSpec(
+            "zh2025", "sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30",
+            "encoder.int8.onnx", "decoder.onnx", "joiner.int8.onnx"
+        )
     }
+
+    private val spec: ModelSpec =
+        if (Prefs.asrModel(context) == Prefs.MODEL_SMALL) MODEL_SMALL else MODEL_LARGE
 
     private var recognizer: OnlineRecognizer? = null
     private var stream: OnlineStream? = null
@@ -33,13 +49,14 @@ class OfflineAsrEngine(
 
     /** 从 assets 拷贝模型到 filesDir(仅首次),返回目录 */
     private fun ensureModel(): File? {
-        val dir = File(context.filesDir, MODEL_NAME)
-        if (dir.exists() && dir.listFiles()?.isNotEmpty() == true) return dir
+        val dir = File(context.filesDir, spec.dirName)
+        val enc = File(dir, spec.encoder)
+        if (enc.exists() && enc.length() > 0) return dir
         dir.mkdirs()
-        val assets = context.assets.list(ASSET_DIR) ?: return null
+        val assets = context.assets.list(spec.assetDir) ?: return null
         for (name in assets) {
             try {
-                context.assets.open("$ASSET_DIR/$name").use { input ->
+                context.assets.open("${spec.assetDir}/$name").use { input ->
                     File(dir, name).outputStream().use { output ->
                         input.copyTo(output)
                     }
@@ -57,11 +74,11 @@ class OfflineAsrEngine(
     fun init(): String? {
         try {
             val dir = ensureModel() ?: return "模型解包失败"
-            val enc = File(dir, "encoder-epoch-99-avg-1.int8.onnx").absolutePath
-            val dec = File(dir, "decoder-epoch-99-avg-1.int8.onnx").absolutePath
-            val join = File(dir, "joiner-epoch-99-avg-1.int8.onnx").absolutePath
+            val enc = File(dir, spec.encoder).absolutePath
+            val dec = File(dir, spec.decoder).absolutePath
+            val join = File(dir, spec.joiner).absolutePath
             val tokens = File(dir, "tokens.txt").absolutePath
-            Log.i(TAG, "模型: enc=$enc")
+            Log.i(TAG, "模型[${spec.assetDir}]: enc=$enc")
             Log.i(TAG, "文件存在: enc=${File(enc).exists()} dec=${File(dec).exists()} join=${File(join).exists()} tok=${File(tokens).exists()}")
 
             val transducer = OnlineTransducerModelConfig.builder()
@@ -75,12 +92,34 @@ class OfflineAsrEngine(
                 .setTokens(tokens)
                 .setNumThreads(2)
                 .setDebug(false)
-                .setModelType("zipformer")
+                .setModelType(if (spec == MODEL_LARGE) "zipformer2" else "zipformer")
                 .build()
 
             val config = OnlineRecognizerConfig.builder()
                 .setOnlineModelConfig(model)
                 .setEnableEndpoint(true)
+                // 课堂语速快、停顿短：静音 1.2s 即断句定稿；硬上限 20s 防止长段积压
+                .setEndpointConfig(
+                    com.k2fsa.sherpa.onnx.EndpointConfig.builder()
+                        .setRule1(
+                            com.k2fsa.sherpa.onnx.EndpointRule.builder()
+                                .setMustContainNonSilence(true)
+                                .setMinTrailingSilence(1.2f)
+                                .build()
+                        )
+                        .setRule2(
+                            com.k2fsa.sherpa.onnx.EndpointRule.builder()
+                                .setMustContainNonSilence(false)
+                                .setMinTrailingSilence(0.9f)
+                                .build()
+                        )
+                        .setRule3(
+                            com.k2fsa.sherpa.onnx.EndpointRule.builder()
+                                .setMinUtteranceLength(20f)
+                                .build()
+                        )
+                        .build()
+                )
                 .setDecodingMethod("greedy_search")
                 .build()
 
@@ -120,9 +159,15 @@ class OfflineAsrEngine(
                     rec.decode(st)
                     val result = rec.getResult(st)
                     val text = result.text.trim()
+                    val endpoint = isEndpoint(st)
                     if (text.isNotEmpty()) {
                         Log.i(TAG, "识别中: '$text'")
-                        onText(text, isEndpoint(st))
+                        onText(text, endpoint)
+                    }
+                    if (endpoint) {
+                        // 关键：endpoint 后必须重置流，否则上下文持续累积，
+                        // 后续每次结果都会携带之前全部文本（表现为"识别越滚越长"的重复）
+                        try { rec.reset(st) } catch (e: Throwable) { Log.e(TAG, "reset 失败", e) }
                     }
                 }
             }
@@ -145,14 +190,16 @@ class OfflineAsrEngine(
             val st = stream ?: return
             // 仅在确有待解码内容时冲刷：空冲刷也会触发解码，
             // 在模拟器翻译层环境会导致 native exit(255)（进程闪退）
-            if (!rec.isReady(st)) {
+            if (rec.isReady(st)) {
+                st.inputFinished()
+                // 循环解码直到流内不再有可解码内容（单次 decode 可能消化不完）
+                var guard = 0
+                while (rec.isReady(st) && guard++ < 200) rec.decode(st)
+                val result = recognizer?.getResult(st)?.text?.trim()
+                if (!result.isNullOrEmpty()) onText(result, true)
+            } else {
                 Log.i(TAG, "finish: 无待解码内容，跳过冲刷")
-                return
             }
-            st.inputFinished()
-            rec.decode(st)
-            val result = recognizer?.getResult(st)?.text?.trim()
-            if (!result.isNullOrEmpty()) onText(result, true)
         } catch (e: Throwable) {
             Log.e(TAG, "finish 出错", e)
         }

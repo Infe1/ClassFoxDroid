@@ -5,3 +5,9 @@ local.properties
 *.iml
 .idea/
 release/*.apk
+
+# 本地测试音频与模型下载副本（assets/zh2025 是构建必需，入库）
+mp3/
+selftest_wav/
+model_zh2025/
+selftest_classroom.wav

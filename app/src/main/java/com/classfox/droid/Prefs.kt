@@ -13,6 +13,13 @@ object Prefs {
     const val KEY_SPLIT_MODE = "split_mode"
     const val KEY_THRESHOLD = "threshold_db"
     const val KEY_FORCE_PORTRAIT = "force_portrait"
+    const val KEY_ASR_MODEL = "asr_model"
+    const val MODEL_SMALL = "zh14m"
+    const val MODEL_LARGE = "zh2025"
+
+    /** 离线识别模型；默认高精度（真实课堂语音下小模型误识别严重） */
+    fun asrModel(ctx: Context): String = get(ctx).getString(KEY_ASR_MODEL, MODEL_LARGE) ?: MODEL_LARGE
+    fun setAsrModel(ctx: Context, v: String) = get(ctx).edit().putString(KEY_ASR_MODEL, v).apply()
 
     fun forcePortrait(ctx: Context): Boolean = get(ctx).getBoolean(KEY_FORCE_PORTRAIT, true)
     fun setForcePortrait(ctx: Context, v: Boolean) = get(ctx).edit().putBoolean(KEY_FORCE_PORTRAIT, v).apply()
