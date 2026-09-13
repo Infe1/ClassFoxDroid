@@ -241,8 +241,15 @@ class RecorderService : Service() {
         }
     }
 
+    /** 课程名 → 安全目录名；空则归入"未命名课程" */
+    private fun courseDir(): String {
+        val safe = courseName.replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_")
+            .trim('_').take(50)
+        return safe.ifBlank { "未命名课程" }
+    }
+
     private fun openTranscriptFile(): File? = try {
-        val dir = File(getExternalFilesDir(null) ?: filesDir, "classfox")
+        val dir = File(getExternalFilesDir(null) ?: filesDir, "classfox/${courseDir()}")
         if (!dir.exists()) dir.mkdirs()
         val day = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.US).format(Date())
         val f = File(dir, "class_transcript_$day.txt")
@@ -528,7 +535,7 @@ class RecorderService : Service() {
 
     private fun prepareWavFile() {
         try {
-            val dir = File(getExternalFilesDir(null) ?: filesDir, "classfox")
+            val dir = File(getExternalFilesDir(null) ?: filesDir, "classfox/${courseDir()}")
             if (!dir.exists()) dir.mkdirs()
             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             val f = File(dir, "classfox_$stamp.wav")

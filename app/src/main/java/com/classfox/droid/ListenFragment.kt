@@ -97,6 +97,8 @@ class ListenFragment : Fragment() {
         b.btnAlertRescue.setOnClickListener { openAiPanel(MODE_RESCUE) }
         b.btnAlertCatchup.setOnClickListener { openAiPanel(MODE_CATCHUP) }
 
+        refreshCourseHistory()
+
         syncFromService()
         render()
     }
@@ -108,6 +110,7 @@ class ListenFragment : Fragment() {
         act.stateSink = stateSink
         syncFromService()
         render()
+        refreshCourseHistory()
     }
 
     override fun onPause() {
@@ -167,6 +170,23 @@ class ListenFragment : Fragment() {
         }
     }
 
+    /** 课程历史：用过/已存在目录的课程名 → 下拉可选 */
+    private fun refreshCourseHistory() {
+        if (_b == null) return
+        val names = mutableSetOf<String>()
+        names.addAll(Prefs.courseHistory(requireContext()))
+        try {
+            val base = java.io.File(requireContext().getExternalFilesDir(null), "classfox")
+            base.listFiles { f -> f.isDirectory && f.name != "keywords" }
+                ?.forEach { names.add(it.name) }
+        } catch (_: Exception) {}
+        if (names.isEmpty()) return
+        val adapter = android.widget.ArrayAdapter(
+            requireContext(), android.R.layout.simple_list_item_1, names.sorted()
+        )
+        b.etCourse.setAdapter(adapter)
+    }
+
     private fun startListening() {
         val act = activity as MainActivity ?: return
         if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.RECORD_AUDIO)
@@ -180,8 +200,10 @@ class ListenFragment : Fragment() {
             return
         }
         if (isRunning) return
+        val course = b.etCourse.text?.toString().orEmpty().trim()
+        Prefs.addCourseHistory(requireContext(), course)
         val i = Intent(act, RecorderService::class.java)
-        i.putExtra(RecorderService.EXTRA_COURSE, b.etCourse.text?.toString().orEmpty().trim())
+        i.putExtra(RecorderService.EXTRA_COURSE, course)
         ContextCompat.startForegroundService(act, i)
         isRunning = true
         isPaused = false

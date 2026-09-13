@@ -36,6 +36,19 @@ object Prefs {
 
     fun llmReady(ctx: Context): Boolean = llmBase(ctx).isNotEmpty() && llmModel(ctx).isNotEmpty()
 
+    // ---- 课程历史（课程名下拉选择用）----
+    const val KEY_COURSE_HISTORY = "course_history"
+
+    fun courseHistory(ctx: Context): Set<String> =
+        get(ctx).getStringSet(KEY_COURSE_HISTORY, emptySet()) ?: emptySet()
+
+    fun addCourseHistory(ctx: Context, name: String) {
+        if (name.isBlank()) return
+        val s = courseHistory(ctx).toMutableSet()
+        s.add(name.trim())
+        get(ctx).edit().putStringSet(KEY_COURSE_HISTORY, s).apply()
+    }
+
     fun forcePortrait(ctx: Context): Boolean = get(ctx).getBoolean(KEY_FORCE_PORTRAIT, true)
     fun setForcePortrait(ctx: Context, v: Boolean) = get(ctx).edit().putBoolean(KEY_FORCE_PORTRAIT, v).apply()
 

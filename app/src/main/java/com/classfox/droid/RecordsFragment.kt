@@ -12,22 +12,23 @@ import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.classfox.droid.databinding.FragmentRecordsBinding
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** 记录页：会话产物列表（转录 txt / 录音 wav），点转录可查看全文，点录音可播放 */
+/** 记录页：按课程分组的会话产物（转录 txt / 录音 wav），点转录看全文，点录音播放 */
 class RecordsFragment : Fragment() {
 
-    data class SessionFile(
-        val file: File,
-        val isTranscript: Boolean
-    )
+    private sealed class Row {
+        class Header(val course: String, val count: Int) : Row()
+        class FileRow(val file: File, val isTranscript: Boolean) : Row()
+    }
 
     private var _b: FragmentRecordsBinding? = null
     private val b get() = _b!!
-    private val items = mutableListOf<SessionFile>()
+    private val rows = mutableListOf<Row>()
     private var player: MediaPlayer? = null
 
     override fun onCreateView(
@@ -59,18 +60,27 @@ class RecordsFragment : Fragment() {
     }
 
     private fun reload() {
-        items.clear()
-        val dir = File(requireContext().getExternalFilesDir(null), "classfox")
-        if (dir.exists()) {
-            items.addAll(
-                dir.listFiles { f -> f.isFile }
-                    ?.filter { it.extension == "txt" || it.extension == "wav" }
-                    ?.sortedByDescending { it.lastModified() }
-                    ?.map { SessionFile(it, it.extension == "txt") }
-                    ?: emptyList()
-            )
+        rows.clear()
+        val base = File(requireContext().getExternalFilesDir(null), "classfox")
+        val groups = linkedMapOf<String, MutableList<File>>()
+        if (base.exists()) {
+            // 课程子目录（keywords 是词表目录，排除）
+            base.listFiles { f -> f.isDirectory && f.name != "keywords" }
+                ?.sortedByDescending { it.lastModified() }
+                ?.forEach { dir ->
+                    val files = dir.listFiles { f -> f.isFile && (f.extension == "txt" || f.extension == "wav") }
+                    if (!files.isNullOrEmpty()) groups[dir.name] = files.toMutableList()
+                }
+            // 旧版本平铺在根目录的文件 → 未分类
+            val loose = base.listFiles { f -> f.isFile && (f.extension == "txt" || f.extension == "wav") }
+            if (!loose.isNullOrEmpty()) groups["未分类（旧记录）"] = loose.toMutableList()
         }
-        b.tvEmpty.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
+        for ((course, files) in groups) {
+            files.sortByDescending { it.lastModified() }
+            rows.add(Row.Header(course, files.size))
+            for (f in files) rows.add(Row.FileRow(f, f.extension == "txt"))
+        }
+        b.tvEmpty.visibility = if (rows.isEmpty()) View.VISIBLE else View.GONE
         b.recycler.adapter?.notifyDataSetChanged()
     }
 
@@ -84,7 +94,7 @@ class RecordsFragment : Fragment() {
             text = content
             setTextIsSelectable(true)
         }
-        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+        MaterialAlertDialogBuilder(requireContext())
             .setTitle(f.name)
             .setView(tv)
             .setPositiveButton("关闭", null)
@@ -109,35 +119,54 @@ class RecordsFragment : Fragment() {
         player = null
     }
 
-    private inner class Adapter : RecyclerView.Adapter<VH>() {
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
-            val v = layoutInflater.inflate(R.layout.item_record, parent, false)
-            return VH(v)
+    private inner class Adapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+        override fun getItemViewType(pos: Int): Int =
+            if (rows[pos] is Row.Header) 0 else 1
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+            return if (viewType == 0) {
+                HeaderVH(layoutInflater.inflate(R.layout.item_record_header, parent, false))
+            } else {
+                FileVH(layoutInflater.inflate(R.layout.item_record, parent, false))
+            }
         }
 
-        override fun getItemCount(): Int = items.size
+        override fun getItemCount(): Int = rows.size
 
-        override fun onBindViewHolder(h: VH, pos: Int) {
-            val item = items[pos]
-            val f = item.file
-            h.title.text = f.name
-            val df = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
-            val sizeKb = f.length() / 1024
-            h.sub.text = "${df.format(Date(f.lastModified()))} · $sizeKb KB"
-            h.tag.text = if (item.isTranscript) "转录" else "录音"
-            h.tag.setTextColor(
-                ContextCompat.getColor(
-                    requireContext(), if (item.isTranscript) R.color.cf_primary else R.color.cf_ok
-                )
-            )
-            h.row.setOnClickListener {
-                stopPlayer()
-                if (item.isTranscript) showTranscript(f) else playWav(f)
+        override fun onBindViewHolder(h: RecyclerView.ViewHolder, pos: Int) {
+            when (val row = rows[pos]) {
+                is Row.Header -> {
+                    h as HeaderVH
+                    h.title.text = "📚 ${row.course}"
+                    h.count.text = "${row.count} 条"
+                }
+                is Row.FileRow -> {
+                    h as FileVH
+                    val f = row.file
+                    h.title.text = f.name
+                    val df = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
+                    h.sub.text = "${df.format(Date(f.lastModified()))} · ${f.length() / 1024} KB"
+                    h.tag.text = if (row.isTranscript) "转录" else "录音"
+                    h.tag.setTextColor(
+                        ContextCompat.getColor(
+                            requireContext(), if (row.isTranscript) R.color.cf_primary else R.color.cf_ok
+                        )
+                    )
+                    h.row.setOnClickListener {
+                        stopPlayer()
+                        if (row.isTranscript) showTranscript(f) else playWav(f)
+                    }
+                }
             }
         }
     }
 
-    private class VH(v: View) : RecyclerView.ViewHolder(v) {
+    private class HeaderVH(v: View) : RecyclerView.ViewHolder(v) {
+        val title: TextView = v.findViewById(R.id.headerTitle)
+        val count: TextView = v.findViewById(R.id.headerCount)
+    }
+
+    private class FileVH(v: View) : RecyclerView.ViewHolder(v) {
         val title: TextView = v.findViewById(R.id.itemTitle)
         val sub: TextView = v.findViewById(R.id.itemSub)
         val tag: TextView = v.findViewById(R.id.itemTag)
