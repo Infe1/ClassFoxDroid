@@ -275,17 +275,23 @@
                     style="@style/CFCardLabel"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="实时字幕" />
+                    android:text="实时字幕（可上滑回看）" />
 
-                <TextView
-                    android:id="@+id/tvCaption"
+                <ScrollView
+                    android:id="@+id/captionScroll"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:minHeight="52dp"
-                    android:text="实时字幕将在这里显示…"
-                    android:textColor="@color/cf_text"
-                    android:textSize="16sp" />
+                    android:layout_height="150dp"
+                    android:layout_marginTop="6dp">
+
+                    <TextView
+                        android:id="@+id/tvCaption"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="实时字幕将在这里显示…"
+                        android:textColor="@color/cf_text"
+                        android:textIsSelectable="true"
+                        android:textSize="16sp" />
+                </ScrollView>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

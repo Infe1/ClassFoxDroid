@@ -285,6 +285,7 @@ class RecorderService : Service() {
                 paused.set(true)
                 mockEngine?.setPaused(true)
                 systemEngine?.setPaused(true)
+                refreshNotification()
                 emit("paused", "已暂停监听")
                 return START_STICKY
             }
@@ -292,6 +293,7 @@ class RecorderService : Service() {
                 paused.set(false)
                 mockEngine?.setPaused(false)
                 systemEngine?.setPaused(false)
+                refreshNotification()
                 emit("resumed", "已继续监听")
                 return START_STICKY
             }
@@ -324,44 +326,66 @@ class RecorderService : Service() {
 
     private fun buildNotification(): Notification {
         val pi = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+            this, 0, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val stopPi = PendingIntent.getService(
             this, 1,
             Intent(this, RecorderService::class.java).setAction(ACTION_STOP),
-            PendingIntent.FLAG_IMMUTABLE
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val pausePi = PendingIntent.getService(
+            this, 2,
+            Intent(this, RecorderService::class.java)
+                .setAction(if (paused.get()) ACTION_RESUME else ACTION_PAUSE),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val b = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("课狐 ClassFox 正在监听")
-            .setContentText(if (courseName.isBlank()) "课堂声音监听中" else "课程：$courseName")
+            .setContentText(
+                if (courseName.isBlank()) "课堂声音监听中" else "课程：$courseName"
+            )
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pi)
-            .addAction(android.R.drawable.ic_media_pause, "停止", stopPi)
             .setOngoing(true)
-            .build()
+        if (paused.get()) {
+            b.addAction(android.R.drawable.ic_media_play, "继续", pausePi)
+        } else {
+            b.addAction(android.R.drawable.ic_media_pause, "暂停", pausePi)
+        }
+        b.addAction(android.R.drawable.ic_media_pause, "停止", stopPi)
+        return b.build()
+    }
+
+    private fun refreshNotification() {
+        if (running.get()) {
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.notify(NOTIF_ID, buildNotification())
+        }
     }
 
     private fun startForegroundSafe() {
+        // startForegroundService 启动后必须先 startForeground，否则系统 5s 后判 ANR；
+        // 无麦克风权限时再走 stopSelf 收尾
+        startForeground(NOTIF_ID, buildNotification())
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
         ) {
+            broadcast("error", "未授予麦克风权限，无法录音")
             stopSelf()
-            return
         }
-        startForeground(NOTIF_ID, buildNotification())
     }
 
     // ---------- 录音主逻辑 ----------
     private fun startRecording() {
         if (running.get()) return
+        startForegroundSafe()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
         ) {
             Log.e(TAG, "无麦克风权限")
-            stopSelf()
             return
         }
-        startForegroundSafe()
 
         val minBuf = AudioRecord.getMinBufferSize(
             SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT

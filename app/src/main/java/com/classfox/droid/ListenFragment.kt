@@ -30,6 +30,26 @@ class ListenFragment : Fragment() {
     private var isPaused = false
     private var logCount = 0
 
+    // 字幕历史 + 手动回滚：停在底部才自动跟随
+    private val captionHistory = StringBuilder()
+    private var captionPartial = ""
+    private var captionAtBottom = true
+    private var logAtBottom = true
+
+    private fun isNearBottom(sv: android.widget.ScrollView): Boolean {
+        val child = sv.getChildAt(0) ?: return true
+        return child.bottom - (sv.height + sv.scrollY) < 60
+    }
+
+    private fun renderCaption() {
+        if (_b == null) return
+        b.tvCaption.text =
+            (captionHistory.toString() + captionPartial).ifBlank { "实时字幕将在这里显示…" }
+        if (captionAtBottom) b.captionScroll.post {
+            b.captionScroll.fullScroll(View.FOCUS_DOWN)
+        }
+    }
+
     private val permLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
             if (grants[Manifest.permission.RECORD_AUDIO] == true) {
@@ -49,6 +69,14 @@ class ListenFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         val act = activity as MainActivity
+
+        // 手动回滚支持：用户上滑离开底部时，暂停自动跟随
+        b.captionScroll.setOnScrollChangeListener { _, _, _, _, _ ->
+            captionAtBottom = isNearBottom(b.captionScroll)
+        }
+        b.logScroll.setOnScrollChangeListener { _, _, _, _, _ ->
+            logAtBottom = isNearBottom(b.logScroll)
+        }
 
         val saved = Prefs.thresholdDb(requireContext())
         b.sliderThreshold.value = saved.toFloat()
@@ -105,10 +133,21 @@ class ListenFragment : Fragment() {
             "resumed" -> { isPaused = false; render(); log(text) }
             "danger_alert" -> { showAlert(text, danger = true); log("[危险] $text") }
             "warning_alert" -> { showAlert(text, danger = false); log("[提醒] $text") }
-            "sentence" -> log("[句] $text")
+            "sentence" -> {
+                captionPartial = ""
+                captionHistory.append(text).append('\n')
+                if (captionHistory.length > 4000) {
+                    captionHistory.delete(0, captionHistory.indexOf('\n').coerceAtLeast(0) + 1)
+                }
+                renderCaption()
+                log("[句] $text")
+            }
             "sentence_corrected" -> log("[修] $text")
             "voice", "asr_status", "error" -> log(text)
-            "partial" -> b.tvCaption.text = text.ifEmpty { "…" }
+            "partial" -> {
+                captionPartial = if (text.isEmpty()) "" else "$text"
+                renderCaption()
+            }
         }
     }
 
@@ -148,7 +187,9 @@ class ListenFragment : Fragment() {
         isPaused = false
         render()
         log("▶ 启动课堂监听…")
-        b.tvCaption.text = "实时字幕将在这里显示…"
+        captionHistory.clear()
+        captionPartial = ""
+        renderCaption()
     }
 
     private fun stopListening() {
@@ -250,6 +291,10 @@ class ListenFragment : Fragment() {
             runAi(q)
         }
         sheet.show()
+        // 直接展开，避免停在半开的 peek 状态
+        sheet.behavior.skipCollapsed = true
+        sheet.behavior.state =
+            com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
         runAi(null)
     }
 
@@ -325,6 +370,6 @@ class ListenFragment : Fragment() {
         val tv = b.tvLog
         val new = "${System.currentTimeMillis().toString().takeLast(6)}  $msg\n"
         if (tv.length() > 8000) tv.text = new else tv.append(new)
-        tv.post { b.logScroll.fullScroll(View.FOCUS_DOWN) }
+        if (logAtBottom) tv.post { b.logScroll.fullScroll(View.FOCUS_DOWN) }
     }
 }

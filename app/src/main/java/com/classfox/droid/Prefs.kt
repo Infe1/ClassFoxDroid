@@ -41,10 +41,9 @@ object Prefs {
 
     fun get(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
-    /** 识别引擎三态；旧版 boolean 迁移：false→offline, true→mock */
+    /** 识别引擎三态；默认离线识别（真机开箱即用），模拟识别变可选项 */
     fun asrMode(ctx: Context): String =
-        get(ctx).getString(KEY_ASR_MODE, null)
-            ?: if (get(ctx).getBoolean(KEY_MOCK_ASR, true)) ASR_MOCK else ASR_OFFLINE
+        get(ctx).getString(KEY_ASR_MODE, null) ?: ASR_OFFLINE
 
     fun setAsrMode(ctx: Context, mode: String) = get(ctx).edit().putString(KEY_ASR_MODE, mode).apply()
 
