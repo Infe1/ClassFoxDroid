@@ -12,6 +12,10 @@ object Prefs {
     const val ASR_OFFLINE = "offline"
     const val KEY_SPLIT_MODE = "split_mode"
     const val KEY_THRESHOLD = "threshold_db"
+    const val KEY_FORCE_PORTRAIT = "force_portrait"
+
+    fun forcePortrait(ctx: Context): Boolean = get(ctx).getBoolean(KEY_FORCE_PORTRAIT, true)
+    fun setForcePortrait(ctx: Context, v: Boolean) = get(ctx).edit().putBoolean(KEY_FORCE_PORTRAIT, v).apply()
 
     fun get(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 

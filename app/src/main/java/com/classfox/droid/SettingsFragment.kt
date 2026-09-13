@@ -26,6 +26,12 @@ class SettingsFragment : Fragment() {
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        b.switchPortrait.isChecked = Prefs.forcePortrait(requireContext())
+        b.switchPortrait.setOnCheckedChangeListener { _, checked ->
+            Prefs.setForcePortrait(requireContext(), checked)
+            (activity as? MainActivity)?.applyOrientation()
+        }
+
         b.toggleEngine.check(
             when (Prefs.asrMode(requireContext())) {
                 Prefs.ASR_SYSTEM -> R.id.btnEngineSystem

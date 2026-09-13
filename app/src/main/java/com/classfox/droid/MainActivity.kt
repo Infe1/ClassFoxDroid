@@ -57,6 +57,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        applyOrientation()
 
         registerReceiver(
             eventReceiver, IntentFilter(RecorderService.ACTION_EVENT),
@@ -76,6 +77,15 @@ class MainActivity : AppCompatActivity() {
             }
             true
         }
+    }
+
+    /** 默认强制竖屏（手机习惯）；设置页可切回跟随系统做横竖对比 */
+    fun applyOrientation() {
+        requestedOrientation =
+            if (Prefs.forcePortrait(this))
+                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            else
+                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
     }
 
     private fun show(f: Fragment) {
