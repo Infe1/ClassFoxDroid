@@ -21,6 +21,21 @@ object Prefs {
     fun asrModel(ctx: Context): String = get(ctx).getString(KEY_ASR_MODEL, MODEL_LARGE) ?: MODEL_LARGE
     fun setAsrModel(ctx: Context, v: String) = get(ctx).edit().putString(KEY_ASR_MODEL, v).apply()
 
+    // ---- AI 救场（OpenAI 兼容接口）----
+    const val KEY_LLM_BASE = "llm_base_url"
+    const val KEY_LLM_KEY = "llm_api_key"
+    const val KEY_LLM_MODEL = "llm_model"
+
+    fun llmBase(ctx: Context): String = get(ctx).getString(KEY_LLM_BASE, "")!!.trim()
+    fun llmKey(ctx: Context): String = get(ctx).getString(KEY_LLM_KEY, "")!!.trim()
+    fun llmModel(ctx: Context): String = get(ctx).getString(KEY_LLM_MODEL, "")!!.trim()
+    fun setLlm(ctx: Context, base: String, key: String, model: String) =
+        get(ctx).edit().putString(KEY_LLM_BASE, base.trim())
+            .putString(KEY_LLM_KEY, key.trim())
+            .putString(KEY_LLM_MODEL, model.trim()).apply()
+
+    fun llmReady(ctx: Context): Boolean = llmBase(ctx).isNotEmpty() && llmModel(ctx).isNotEmpty()
+
     fun forcePortrait(ctx: Context): Boolean = get(ctx).getBoolean(KEY_FORCE_PORTRAIT, true)
     fun setForcePortrait(ctx: Context, v: Boolean) = get(ctx).edit().putBoolean(KEY_FORCE_PORTRAIT, v).apply()
 

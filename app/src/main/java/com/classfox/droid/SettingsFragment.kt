@@ -133,6 +133,20 @@ class SettingsFragment : Fragment() {
             Toast.makeText(requireContext(), "已切换模型，下次开始监听时生效", Toast.LENGTH_SHORT).show()
         }
 
+        // AI 救场配置：输入即保存
+        b.etLlmBase.setText(Prefs.llmBase(requireContext()))
+        b.etLlmKey.setText(Prefs.llmKey(requireContext()))
+        b.etLlmModel.setText(Prefs.llmModel(requireContext()))
+        val saveLlm = {
+            Prefs.setLlm(
+                requireContext(),
+                b.etLlmBase.text.toString(), b.etLlmKey.text.toString(), b.etLlmModel.text.toString()
+            )
+        }
+        b.etLlmBase.addTextChangedListener(saveWatcher(saveLlm))
+        b.etLlmKey.addTextChangedListener(saveWatcher(saveLlm))
+        b.etLlmModel.addTextChangedListener(saveWatcher(saveLlm))
+
         b.btnSelfTest.setOnClickListener {
             selfTestLauncher.launch(arrayOf("audio/wav", "audio/x-wav", "audio/*"))
         }
@@ -148,6 +162,12 @@ class SettingsFragment : Fragment() {
     override fun onDestroyView() {
         _b = null
         super.onDestroyView()
+    }
+
+    private fun saveWatcher(save: () -> Unit) = object : android.text.TextWatcher {
+        override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+        override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+        override fun afterTextChanged(s: android.text.Editable?) = save()
     }
 
     private fun hint() {

@@ -338,7 +338,90 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- 语音自检 -->
+        <!-- AI 救场 -->
+        <com.google.android.material.card.MaterialCardView
+            style="@style/CFCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="AI 救场（大模型接口）"
+                    android:textColor="@color/cf_text"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="OpenAI 兼容 /chat/completions（DeepSeek、各类中转、本地 Ollama 均可）。课程资料可放到应用目录 classfox/current_class_material.txt"
+                    android:textColor="@color/cf_text_dim"
+                    android:textSize="12sp" />
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:hint="接口地址，如 https://api.deepseek.com/v1"
+                    app:boxBackgroundColor="@color/cf_surface"
+                    app:boxStrokeColor="@color/cf_stroke">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etLlmBase"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="textUri"
+                        android:textColor="@color/cf_text" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:hint="API Key（本地服务可留空）"
+                    app:boxBackgroundColor="@color/cf_surface"
+                    app:boxStrokeColor="@color/cf_stroke"
+                    app:endIconMode="password_toggle">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etLlmKey"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="textPassword"
+                        android:textColor="@color/cf_text" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:hint="模型名，如 deepseek-chat / qwen2.5:7b"
+                    app:boxBackgroundColor="@color/cf_surface"
+                    app:boxStrokeColor="@color/cf_stroke">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etLlmModel"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="text"
+                        android:textColor="@color/cf_text" />
+                </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- 真实音频自检 -->
         <com.google.android.material.card.MaterialCardView
             style="@style/CFCard"
             android:layout_width="match_parent"

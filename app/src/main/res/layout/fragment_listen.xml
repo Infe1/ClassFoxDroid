@@ -57,6 +57,33 @@
                     android:layout_height="wrap_content"
                     android:textColor="@color/cf_text"
                     android:textSize="14sp" />
+
+                <LinearLayout
+                    android:id="@+id/rowAlertActions"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal"
+                    android:visibility="gone">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnAlertRescue"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:backgroundTint="@color/cf_danger"
+                        android:text="AI 救场"
+                        android:textColor="@color/cf_text" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnAlertCatchup"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:layout_weight="1"
+                        android:text="讲到哪了" />
+                </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -193,17 +220,42 @@
                 android:enabled="false"
                 android:text="暂停" />
 
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnStop"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="0.8"
+                    android:backgroundTint="@color/cf_danger"
+                    android:enabled="false"
+                    android:text="停止"
+                    android:textColor="@color/cf_text" />
+        </LinearLayout>
+
+        <!-- AI 手动入口 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnStop"
-                style="@style/Widget.Material3.Button.TonalButton"
+                android:id="@+id/btnAiRescue"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="AI 救场" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnAiCatchup"
+                style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
-                android:layout_weight="0.8"
-                android:backgroundTint="@color/cf_danger"
-                android:enabled="false"
-                android:text="停止"
-                android:textColor="@color/cf_text" />
+                android:layout_weight="1"
+                android:text="老师讲到哪了" />
         </LinearLayout>
 
         <!-- 实时字幕 -->

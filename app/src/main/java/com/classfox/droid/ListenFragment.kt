@@ -9,13 +9,20 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
+import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.classfox.droid.databinding.FragmentListenBinding
 
-/** 监听页：状态卡 + 控制按钮 + 实时字幕 + 警报卡 + 事件日志 */
+/** 监听页：状态卡 + 控制按钮 + 实时字幕 + 警报卡 + 事件日志 + AI 救场 */
 class ListenFragment : Fragment() {
+
+    companion object {
+        const val MODE_RESCUE = 0
+        const val MODE_CATCHUP = 1
+    }
 
     private var _b: FragmentListenBinding? = null
     private val b get() = _b!!
@@ -57,6 +64,10 @@ class ListenFragment : Fragment() {
         b.btnStart.setOnClickListener { startListening() }
         b.btnPause.setOnClickListener { togglePause() }
         b.btnStop.setOnClickListener { stopListening() }
+        b.btnAiRescue.setOnClickListener { openAiPanel(MODE_RESCUE) }
+        b.btnAiCatchup.setOnClickListener { openAiPanel(MODE_CATCHUP) }
+        b.btnAlertRescue.setOnClickListener { openAiPanel(MODE_RESCUE) }
+        b.btnAlertCatchup.setOnClickListener { openAiPanel(MODE_CATCHUP) }
 
         syncFromService()
         render()
@@ -197,11 +208,115 @@ class ListenFragment : Fragment() {
         b.tvAlertTag.text = if (danger) "危险 · 需要警惕" else "提醒"
         b.tvAlertTag.setTextColor(c)
         b.btnAlertDismiss.setOnClickListener { hideAlert() }
+        b.rowAlertActions.visibility = View.VISIBLE
     }
 
     private fun hideAlert() {
         if (_b == null) return
         b.cardAlert.visibility = View.GONE
+        b.rowAlertActions.visibility = View.GONE
+    }
+
+    // ---------- AI 救场 / 讲到哪了 ----------
+    private var aiMode = MODE_RESCUE
+    private var lastRescue: AiAssistant.RescueResult? = null
+    private var lastSummary: String? = null
+    private var aiHistory = mutableListOf<LlmClient.ChatMsg>()
+    private var aiSheet: com.google.android.material.bottomsheet.BottomSheetDialog? = null
+    private var aiBody: android.widget.TextView? = null
+    private var aiStatus: android.widget.TextView? = null
+
+    private fun openAiPanel(mode: Int) {
+        if (!Prefs.llmReady(requireContext())) {
+            android.widget.Toast.makeText(
+                requireContext(), "请先在 设置 → AI 救场 配置大模型接口", android.widget.Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        aiMode = mode
+        aiHistory = mutableListOf()
+        val sheet = com.google.android.material.bottomsheet.BottomSheetDialog(requireContext())
+        val v = layoutInflater.inflate(R.layout.ai_panel, null)
+        sheet.setContentView(v)
+        aiSheet = sheet
+        aiBody = v.findViewById(R.id.tvAiBody)
+        aiStatus = v.findViewById(R.id.tvAiStatus)
+        v.findViewById<TextView>(R.id.tvAiTitle).text =
+            if (mode == MODE_RESCUE) "AI 救场" else "老师讲到哪了"
+        v.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnAiSend).setOnClickListener {
+            val q = v.findViewById<EditText>(R.id.etFollowup).text.toString().trim()
+            if (q.isEmpty()) return@setOnClickListener
+            v.findViewById<EditText>(R.id.etFollowup).setText("")
+            runAi(q)
+        }
+        sheet.show()
+        runAi(null)
+    }
+
+    /** mode: 初次调用用 aiMode；有 followup 时按 aiMode 走对应追问 */
+    private fun runAi(followup: String?) {
+        val ctx = requireContext()
+        val body = aiBody ?: return
+        aiStatus?.text = if (followup == null) "思考中…" else "回答中…"
+        Thread {
+            try {
+                val svc = (activity as? MainActivity)?.service
+                val resultText: String
+                if (followup == null && aiMode == MODE_RESCUE) {
+                    val t = svc?.recentTranscript(2).orEmpty()
+                    if (t.isBlank()) {
+                        postAi("最近 2 分钟还没有转录内容。开始监听并等老师讲话后再试。", "")
+                        return@Thread
+                    }
+                    val r = AiAssistant.rescue(ctx, t)
+                    lastRescue = r
+                    aiHistory = mutableListOf()
+                    resultText = AiAssistant.formatRescue(r)
+                } else if (followup == null) {
+                    val t = svc?.recentTranscript(10).orEmpty()
+                    if (t.isBlank()) {
+                        postAi("最近 10 分钟还没有转录内容。开始监听并等老师讲话后再试。", "")
+                        return@Thread
+                    }
+                    val s = AiAssistant.catchup(ctx, t)
+                    lastSummary = s
+                    aiHistory = mutableListOf()
+                    resultText = s
+                } else if (aiMode == MODE_RESCUE) {
+                    val r = lastRescue ?: AiAssistant.RescueResult("", "", "（无第一轮结果）")
+                    val a = AiAssistant.rescueChat(
+                        ctx, r, svc?.recentTranscript(10).orEmpty(), aiHistory, followup
+                    )
+                    aiHistory.add(LlmClient.ChatMsg("user", followup))
+                    aiHistory.add(LlmClient.ChatMsg("assistant", a))
+                    resultText = AiAssistant.formatRescue(r) + "\n\n―― 追问 ――\n问：$followup\n答：$a"
+                } else {
+                    val s = lastSummary ?: "（无进度摘要）"
+                    val a = AiAssistant.catchupChat(
+                        ctx, s, svc?.recentTranscript(10).orEmpty(), aiHistory, followup
+                    )
+                    aiHistory.add(LlmClient.ChatMsg("user", followup))
+                    aiHistory.add(LlmClient.ChatMsg("assistant", a))
+                    resultText = (s + "\n\n―― 追问 ――\n问：$followup\n答：$a")
+                }
+                postAi(resultText, "")
+            } catch (e: Exception) {
+                postAi("", "✗ ${e.message}")
+            }
+        }.apply { name = "classfox-ai"; start() }
+    }
+
+    private fun postAi(bodyText: String, statusText: String) {
+        val act = activity ?: return
+        act.runOnUiThread {
+            if (_b == null || aiSheet == null) return@runOnUiThread
+            if (bodyText.isNotEmpty()) {
+                aiBody?.text = bodyText
+                aiStatus?.text = ""
+                aiBody?.post { aiBody?.let { b -> (b.parent as? android.widget.ScrollView)?.fullScroll(View.FOCUS_DOWN) } }
+            }
+            if (statusText.isNotEmpty()) aiStatus?.text = statusText
+        }
     }
 
     private fun log(msg: String) {

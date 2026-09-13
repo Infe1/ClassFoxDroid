@@ -99,6 +99,8 @@ class RecorderService : Service() {
     private var lastCommitted: String? = null
     private var lastCommittedWasClosed = false
     private val recentNorm = ArrayDeque<String>() // 近重复窗口
+    private class RecentLine(val at: Long, val line: String)
+    private val recentLines = ArrayDeque<RecentLine>() // 最近转录行（内存，供 AI 救场/进度用）
     private var dangerKeywords: List<String> = emptyList()
     private var warningKeywords: List<String> = emptyList()
 
@@ -117,6 +119,13 @@ class RecorderService : Service() {
         warningKeywords = w
         Log.i(TAG, "词表已加载: 危险${d.size}条 提醒${w.size}条")
     }
+
+    /** 最近 N 分钟的转录行（内存缓存，供 AI 救场/进度） */
+    fun recentTranscript(minutes: Int): String = try {
+        val cutoff = System.currentTimeMillis() - minutes * 60_000L
+        synchronized(recentLines) { recentLines.filter { it.at >= cutoff } }
+            .joinToString("\n") { it.line }
+    } catch (_: Exception) { "" }
 
     /**
      * 唯一识别文本入口：真实引擎与模拟引擎都喂这里。
@@ -161,6 +170,10 @@ class RecorderService : Service() {
             f?.appendText("[$stamp] $s\n")
         } catch (e: Exception) {
             Log.e(TAG, "写转录失败", e)
+        }
+        synchronized(recentLines) {
+            recentLines.addLast(RecentLine(System.currentTimeMillis(), "[$stamp] $s"))
+            while (recentLines.size > 600) recentLines.removeFirst()
         }
         lastCommitted = s
         lastCommittedWasClosed = isClosedSentence(s)
@@ -373,6 +386,7 @@ class RecorderService : Service() {
         lastCommitted = null
         lastCommittedWasClosed = false
         recentNorm.clear()
+        synchronized(recentLines) { recentLines.clear() }
         prepareWavFile()
 
         // 识别引擎：设置三选一（模拟 / 系统厂商接口 / 端侧离线），都不阻断录音链路
