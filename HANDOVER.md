@@ -11,6 +11,14 @@
 **v0.7（2026-09-13）：UI 全面重做（Material3 深色三页架构）+ 功能框架补齐 + 模拟识别模式，已在新建 MuMu 实例（index 3, adb 127.0.0.1:16480）上完成端到端验证（截图+logcat）。工程已 git init。**
 端侧离线中文 ASR 真实链路保留（sherpa-onnx），但模拟器上 decode 仍会 native 崩溃（环境问题，见 §7-P0）；模拟器/演示用「模拟识别」开关验证全链路，真机请切回离线识别。
 
+### v0.8.x 更新（2026-09-13 下午）
+- v0.8.0：新增系统识别引擎（厂商 SpeechRecognizer，三选一：模拟/系统/离线）
+- v0.8.1：默认强制竖屏 + 横屏双栏布局（layout-land）
+- v0.8.2：修复停止闪退（finish 解码门控）；系统识别不可用不再回退离线；新增真实音频自检（SAF 选 WAV 直接喂识别器）
+- **v0.8.3（重要）**：修复"识别越滚越长的重复"真根因——endpoint 触发后未调用 `recognizer.reset(stream)`，上下文持续累积；endpoint 规则收紧（静音 1.2s 断句 / 20s 硬上限）；finish 循环冲刷；接入 2025 大模型 `sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30`（encoder 153MB，assets/zh2025，默认），旧 14M 模型保留可切
+- **环境结论修正**：MuMu 实例3（新建，Android 12）上离线解码不崩，exit(255) 是旧实例环境特例；用户 89 分钟真实课堂录音三段自检识别连贯、分句正常、无重复
+- 测试资产：`mp3/标准录音 53.mp3`（用户真实录音）、`selftest_wav/`（切片）、设置页「真实音频自检」入口
+
 ### v0.7 主要变化
 - 代码重构：`MainActivity`（外壳+底部导航）+ `ListenFragment`（监听）/`RecordsFragment`（记录：转录查看+WAV播放）/`SettingsFragment`（设置）
 - 新增：`MockAsrEngine`（脚本模拟识别）、`Keywords`（两级词表文件化可编辑热重载）、`Prefs`（SharedPreferences）
