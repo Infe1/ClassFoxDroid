@@ -26,9 +26,21 @@ class SettingsFragment : Fragment() {
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        b.switchMock.isChecked = Prefs.isMockAsr(requireContext())
-        b.switchMock.setOnCheckedChangeListener { _, checked ->
-            Prefs.setMockAsr(requireContext(), checked)
+        b.toggleEngine.check(
+            when (Prefs.asrMode(requireContext())) {
+                Prefs.ASR_SYSTEM -> R.id.btnEngineSystem
+                Prefs.ASR_OFFLINE -> R.id.btnEngineOffline
+                else -> R.id.btnEngineMock
+            }
+        )
+        b.toggleEngine.addOnButtonCheckedListener { _, _, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            val mode = when (b.toggleEngine.checkedButtonId) {
+                R.id.btnEngineSystem -> Prefs.ASR_SYSTEM
+                R.id.btnEngineOffline -> Prefs.ASR_OFFLINE
+                else -> Prefs.ASR_MOCK
+            }
+            Prefs.setAsrMode(requireContext(), mode)
             hint()
         }
 
@@ -72,10 +84,14 @@ class SettingsFragment : Fragment() {
     }
 
     private fun hint() {
-        b.tvEngineHint.text = if (Prefs.isMockAsr(requireContext()))
-            "当前：模拟识别 —— 按内置课堂脚本产出文本，用于验证分句/转录/警报链路（模拟器或演示用）。下次开始监听时生效。"
-        else
-            "当前：端侧离线识别（sherpa-onnx 流式中文）—— 完全离线，无需网络。识别精度取决于模型，下次开始监听时生效。"
+        b.tvEngineHint.text = when (Prefs.asrMode(requireContext())) {
+            Prefs.ASR_SYSTEM ->
+                "当前：系统识别（厂商接口）—— 调用设备自带的语音识别服务（通常为讯飞/厂商自研引擎），不占安装包体积；需设备提供该服务，若无将自动回退到离线识别。下次开始监听时生效。"
+            Prefs.ASR_OFFLINE ->
+                "当前：端侧离线识别（sherpa-onnx 流式中文）—— 完全离线、行为一致，模型已内置；识别精度取决于内置模型大小。下次开始监听时生效。"
+            else ->
+                "当前：模拟识别 —— 按内置课堂脚本产出文本，用于验证分句/转录/警报链路（模拟器或演示用）。下次开始监听时生效。"
+        }
     }
 
     private fun editKeywords(danger: Boolean) {

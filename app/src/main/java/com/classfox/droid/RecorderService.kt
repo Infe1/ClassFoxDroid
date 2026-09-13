@@ -88,9 +88,10 @@ class RecorderService : Service() {
     private var lastVoiceEventAt = 0L
     private var lastStatePush = 0L
 
-    // ---- 识别引擎（模拟 or 端侧离线，二选一）----
+    // ---- 识别引擎（模拟 / 系统厂商接口 / 端侧离线，三选一）----
     private var asrEngine: OfflineAsrEngine? = null
     private var mockEngine: MockAsrEngine? = null
+    private var systemEngine: SystemAsrEngine? = null
 
     // ---- 分句 / 转录 / 关键词 ----
     private val splitter = SentenceSplitter()
@@ -270,12 +271,14 @@ class RecorderService : Service() {
             ACTION_PAUSE -> {
                 paused.set(true)
                 mockEngine?.setPaused(true)
+                systemEngine?.setPaused(true)
                 emit("paused", "已暂停监听")
                 return START_STICKY
             }
             ACTION_RESUME -> {
                 paused.set(false)
                 mockEngine?.setPaused(false)
+                systemEngine?.setPaused(false)
                 emit("resumed", "已继续监听")
                 return START_STICKY
             }
@@ -290,6 +293,7 @@ class RecorderService : Service() {
     override fun onDestroy() {
         running.set(false)
         try { mockEngine?.stop() } catch (_: Exception) {}
+        try { systemEngine?.stop() } catch (_: Exception) {}
         try { asrEngine?.release() } catch (_: Exception) {}
         try { audioRecord?.release() } catch (_: Exception) {}
         try { wavOut?.close() } catch (_: Exception) {}
@@ -371,28 +375,11 @@ class RecorderService : Service() {
         recentNorm.clear()
         prepareWavFile()
 
-        // 识别引擎：设置决定用模拟识别还是端侧离线识别（都不阻断录音链路）
-        if (Prefs.isMockAsr(this)) {
-            val mock = MockAsrEngine { text, final ->
-                mainHandler.post { ingestAsrText(text, final) }
-            }
-            mockEngine = mock
-            mock.start()
-            emit("asr_status", "[模拟识别] 已启动（可在设置切换为离线识别）")
-        } else if (asrEngine == null) {
-            val engine = OfflineAsrEngine(this) { text, isFinal ->
-                if (text.isNotEmpty()) mainHandler.post { ingestAsrText(text, isFinal) }
-            }
-            asrEngine = engine
-            val err = engine.init()
-            if (err != null) {
-                Log.e(TAG, "ASR 不可用: $err")
-                emit("asr_status", "离线ASR不可用: $err")
-            } else {
-                emit("asr_status", "离线ASR已就绪(流式中文)")
-            }
-        } else {
-            emit("asr_status", "离线ASR复用已就绪引擎")
+        // 识别引擎：设置三选一（模拟 / 系统厂商接口 / 端侧离线），都不阻断录音链路
+        when (Prefs.asrMode(this)) {
+            Prefs.ASR_MOCK -> startMockEngine()
+            Prefs.ASR_SYSTEM -> startSystemEngine()
+            else -> startOfflineEngine()
         }
 
         recordThread = Thread({
@@ -405,8 +392,8 @@ class RecorderService : Service() {
             }
             rec.stop()
             rec.release()
-            mockEngine?.stop()
-            mockEngine = null
+            mockEngine?.stop(); mockEngine = null
+            systemEngine?.stop(); systemEngine = null
             asrEngine?.finish()
             flushTranscript()
             finalizeWav()
@@ -414,6 +401,53 @@ class RecorderService : Service() {
             stopRequested.set(false)
             Log.i(TAG, "录音结束")
         }, "classfox-recorder").apply { start() }
+    }
+
+    private fun startMockEngine() {
+        val mock = MockAsrEngine { text, final ->
+            mainHandler.post { ingestAsrText(text, final) }
+        }
+        mockEngine = mock
+        mock.start()
+        emit("asr_status", "[模拟识别] 已启动（可在设置切换为其他引擎）")
+    }
+
+    private fun startSystemEngine() {
+        val sys = SystemAsrEngine(
+            this,
+            onText = { text, final ->
+                mainHandler.post { ingestAsrText(text, final) }
+            },
+            onStatus = { msg -> emit("asr_status", msg) }
+        )
+        systemEngine = sys
+        sys.start()
+        if (sys.running) {
+            emit("asr_status", "[系统识别] 已启动（厂商接口 · zh-CN）")
+        } else {
+            // 设备没有系统/厂商语音服务：回退到端侧离线识别，保证链路可用
+            Log.w(TAG, "系统识别不可用，回退离线识别")
+            startOfflineEngine()
+            emit("asr_status", "[系统识别] 不可用，已回退到离线识别")
+        }
+    }
+
+    private fun startOfflineEngine() {
+        if (asrEngine == null) {
+            val engine = OfflineAsrEngine(this) { text, isFinal ->
+                if (text.isNotEmpty()) mainHandler.post { ingestAsrText(text, isFinal) }
+            }
+            asrEngine = engine
+            val err = engine.init()
+            if (err != null) {
+                Log.e(TAG, "ASR 不可用: $err")
+                emit("asr_status", "离线ASR不可用: $err")
+                return
+            }
+            emit("asr_status", "离线ASR已就绪(流式中文)")
+        } else {
+            emit("asr_status", "离线ASR复用已就绪引擎")
+        }
     }
 
     private fun processChunk(buf: ShortArray, n: Int) {
