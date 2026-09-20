@@ -120,6 +120,11 @@ adb -s <serial> logcat -d -s ClassFoxAsr:I ClassFoxRec:I | tail -40
 - `ClassFoxRec`：`句:` / `关键词命中:` / `录音开始/结束` / `WAV 完成` ← **端到端铁证**
 - `ClassFoxAsr`：模型解包、`识别中:`、初始化结果
 
+### 3.4 版本备份（无账号本地远程，2026-09-21 起）
+- 工程 remote `backup` → 本机裸仓库 `D:\GitRemotes\ClassFoxDroid.git`（零账号零权限，防误删/坏提交）。日常提交后随手 `git push backup main`。
+- **异地备份（防整盘故障）**：`git bundle create ClassFoxDroid_$(date +%Y%m%d).bundle --all`，把单文件 bundle 放进网盘同步目录/U盘即可；恢复：`git clone ClassFoxDroid_xxx.bundle ClassFoxDroid`。bundle 约 300MB（含模型资产）。
+- `release/*.apk` 不进 git，历来做磁盘直存。
+
 ---
 
 ## 4. 架构与数据流
