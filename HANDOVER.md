@@ -231,6 +231,10 @@ powershell -NoProfile -Command "Get-Process MuMuNxDevice | Select-Object Id,Main
 5. **识别重复**：曾出现同句重复、`有有` 类重复 → 已加去重（`SentenceSplitter.addSentence` 的 recent 去重 + 半句修正），**未验证效果**。
 6. **UI 观感差**：用户评价「界面确实做的也太差一点」。当前是极简单 Activity，**没有任何设计投入**。
 
+### P1.5 — v0.10.1 真机回归新增（2026-09-21 用户反馈，待修）
+11. **日志没法快速点开**：日志迁移到设置页后查看入口埋得太深（设置页要滚到底再点按钮）。候选方案（按最小改动排序）：a) 监听页顶部加一个轻量日志图标/入口按钮（不恢复日志卡，只跳转或弹对话框）；b) 设置页「运行日志」卡上移。**尚未定案，待与用户确认或自行决策后实施。**
+12. **主页字幕在切换 tab（column）后消失**：用户报告切走再切回监听页字幕区空白；且不清楚字幕能否滑动（v0.10.1 的 CaptionScrollView 修复在真机上的效果待确认）。**根因未定位**——候选方向：ListenFragment 视图重建后 `captionHistory` 丢失（成员在 Fragment 而 sink 回填只发生在 onResume 之后的新事件）；或 MainActivity 用 `replace()`+commitNow 使 fragment 状态未保留。修复时先查 MainActivity 的 tab 切换方式与 ListenFragment 状态保存策略。
+
 ### P2 — 工程卫生
 7. **无版本控制**：`D:\Dev\ClassFoxDroid` 不是 git 仓库。**建议第一步就 `git init`**，否则改动不可回溯。
 8. **包体 56MB**：模型 25MB + jniLibs 30MB（只留 arm64-v8a）。若只发真机可接受；若要减，考虑模型量化/裁剪或按 ABI 分包。
