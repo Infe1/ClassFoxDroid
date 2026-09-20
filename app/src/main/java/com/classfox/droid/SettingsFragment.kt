@@ -143,6 +143,31 @@ class SettingsFragment : Fragment() {
             b.tvThreshold.text = "人声事件阈值：$db dB"
             (activity as? MainActivity)?.service?.setVoiceThreshold(db.toDouble())
         }
+        // 拖动结束才提示，避免滑动过程 Toast 刷屏
+        b.sliderThreshold.addOnSliderTouchListener(object : com.google.android.material.slider.Slider.OnSliderTouchListener {
+            override fun onStartTrackingTouch(slider: com.google.android.material.slider.Slider) {}
+            override fun onStopTrackingTouch(slider: com.google.android.material.slider.Slider) {
+                toast("已保存：人声阈值")
+            }
+        })
+
+        // 运行日志：保留天数 + 查看入口（日志本体已从监听页移除，见 LogStore）
+        val logDays = LogStore.retentionDays(requireContext())
+        b.sliderLogRetention.value = logDays.toFloat().coerceIn(1f, 30f)
+        b.tvLogRetention.text = "日志保留：$logDays 天"
+        b.sliderLogRetention.addOnChangeListener { _, value, fromUser ->
+            if (!fromUser) return@addOnChangeListener
+            val d = value.toInt()
+            LogStore.setRetentionDays(requireContext(), d)
+            b.tvLogRetention.text = "日志保留：$d 天"
+        }
+        b.sliderLogRetention.addOnSliderTouchListener(object : com.google.android.material.slider.Slider.OnSliderTouchListener {
+            override fun onStartTrackingTouch(slider: com.google.android.material.slider.Slider) {}
+            override fun onStopTrackingTouch(slider: com.google.android.material.slider.Slider) {
+                toast("已保存：日志保留天数")
+            }
+        })
+        b.btnViewLog.setOnClickListener { showTodayLog() }
 
         b.toggleModel.check(
             if (Prefs.asrModel(requireContext()) == Prefs.MODEL_SMALL)
@@ -170,6 +195,13 @@ class SettingsFragment : Fragment() {
         b.etLlmBase.addTextChangedListener(saveWatcher(saveLlm))
         b.etLlmKey.addTextChangedListener(saveWatcher(saveLlm))
         b.etLlmModel.addTextChangedListener(saveWatcher(saveLlm))
+        // 输入即存已生效；失焦时给出明确反馈（避免每个按键都弹 Toast）
+        val llmSavedOnBlur = { v: View, hasFocus: Boolean ->
+            if (!hasFocus) toast("已保存：AI 救场配置")
+        }
+        b.etLlmBase.setOnFocusChangeListener(llmSavedOnBlur)
+        b.etLlmKey.setOnFocusChangeListener(llmSavedOnBlur)
+        b.etLlmModel.setOnFocusChangeListener(llmSavedOnBlur)
 
         b.btnDiag.setOnClickListener { runEngineDiag() }
         b.btnSelfTest.setOnClickListener {
@@ -224,15 +256,40 @@ class SettingsFragment : Fragment() {
             .setPositiveButton("保存") { _, _ ->
                 Keywords.save(requireContext(), danger, et.text.toString())
                 (activity as? MainActivity)?.service?.reloadKeywords()
-                toastSaved()
+                toast("已保存并重载词表")
             }
             .setNegativeButton("取消", null)
             .show()
     }
 
-    private fun toastSaved() {
-        android.widget.Toast.makeText(
-            requireContext(), "已保存并重载词表", android.widget.Toast.LENGTH_SHORT
-        ).show()
+    private fun toast(msg: String) {
+        Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
+    }
+
+    /** 今日日志对话框：内存缓冲 + 当天落盘文件合并展示，monospace 可选中便于复制反馈 */
+    private fun showTodayLog() {
+        val ctx = requireContext()
+        val day = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
+            .format(java.util.Date())
+        val file = java.io.File(
+            ctx.getExternalFilesDir(null) ?: ctx.filesDir, "logs/log_$day.txt"
+        )
+        val disk = try { file.readText().trimEnd() } catch (_: Exception) { "" }
+        val memText = LogStore.recent().joinToString("\n")
+        val content = if (disk.isNotBlank()) disk else memText.ifBlank { "今日暂无日志" }
+
+        val tv = android.widget.TextView(ctx).apply {
+            setPadding(48, 32, 48, 32)
+            textSize = 11f
+            typeface = Typeface.MONOSPACE
+            setTextColor(ContextCompat.getColor(ctx, R.color.cf_text))
+            text = content
+            setTextIsSelectable(true)
+        }
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
+            .setTitle("今日日志（$day）")
+            .setView(tv)
+            .setPositiveButton("关闭", null)
+            .show()
     }
 }

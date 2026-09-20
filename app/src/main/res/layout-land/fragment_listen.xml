@@ -289,10 +289,10 @@
                         android:layout_height="wrap_content"
                         android:text="实时字幕（可上滑回看）" />
 
-                    <ScrollView
+                    <com.classfox.droid.CaptionScrollView
                         android:id="@+id/captionScroll"
                         android:layout_width="match_parent"
-                        android:layout_height="120dp"
+                        android:layout_height="220dp"
                         android:layout_marginTop="6dp">
 
                         <TextView
@@ -303,74 +303,7 @@
                             android:textColor="@color/cf_text"
                             android:textIsSelectable="true"
                             android:textSize="15sp" />
-                    </ScrollView>
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.card.MaterialCardView
-                style="@style/CFCard"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="14dp">
-
-                    <TextView
-                        android:id="@+id/tvThreshold"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="人声事件阈值：-30 dB（只记录高于此值的声音）"
-                        android:textColor="@color/cf_text"
-                        android:textSize="13sp" />
-
-                    <com.google.android.material.slider.Slider
-                        android:id="@+id/sliderThreshold"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:stepSize="1"
-                        android:valueFrom="-60"
-                        android:valueTo="-10"
-                        app:labelBehavior="gone" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.card.MaterialCardView
-                style="@style/CFCard"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="14dp">
-
-                    <TextView
-                        style="@style/CFCardLabel"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="事件日志" />
-
-                    <ScrollView
-                        android:id="@+id/logScroll"
-                        android:layout_width="match_parent"
-                        android:layout_height="220dp"
-                        android:layout_marginTop="6dp">
-
-                        <TextView
-                            android:id="@+id/tvLog"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:fontFamily="monospace"
-                            android:text="等待启动…\n"
-                            android:textColor="@color/cf_text_dim"
-                            android:textSize="12sp" />
-                    </ScrollView>
+                    </com.classfox.droid.CaptionScrollView>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
         </LinearLayout>

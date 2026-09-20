@@ -16,7 +16,10 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.classfox.droid.databinding.FragmentListenBinding
 
-/** 监听页：状态卡 + 控制按钮 + 实时字幕 + 警报卡 + 事件日志 + AI 救场 */
+/**
+ * 监听页：状态卡 + 课程名 + 控制按钮 + AI 入口 + 可回滚实时字幕。
+ * 阈值/日志已移至设置页（问题3/4：避免误触、保持页面聚焦）。
+ */
 class ListenFragment : Fragment() {
 
     companion object {
@@ -28,35 +31,19 @@ class ListenFragment : Fragment() {
     private val b get() = _b!!
     private var isRunning = false
     private var isPaused = false
-    private var logCount = 0
 
     // 字幕历史 + 手动回滚：停在底部才自动跟随
     private val captionHistory = StringBuilder()
     private var captionPartial = ""
     private var captionAtBottom = true
-    private var logAtBottom = true
-
-    private fun isNearBottom(sv: android.widget.ScrollView): Boolean {
-        val child = sv.getChildAt(0) ?: return true
-        return child.bottom - (sv.height + sv.scrollY) < 60
-    }
-
-    private fun renderCaption() {
-        if (_b == null) return
-        b.tvCaption.text =
-            (captionHistory.toString() + captionPartial).ifBlank { "实时字幕将在这里显示…" }
-        if (captionAtBottom) b.captionScroll.post {
-            b.captionScroll.fullScroll(View.FOCUS_DOWN)
-        }
-    }
 
     private val permLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
             if (grants[Manifest.permission.RECORD_AUDIO] == true) {
-                log("[OK] 麦克风权限已授予，可开始监听")
+                LogStore.append(requireContext(), "[OK] 麦克风权限已授予")
                 startListening()
             } else {
-                log("[X] 未授予麦克风权限，无法录音")
+                LogStore.append(requireContext(), "[X] 未授予麦克风权限")
             }
         }
 
@@ -68,25 +55,9 @@ class ListenFragment : Fragment() {
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        val act = activity as MainActivity
-
         // 手动回滚支持：用户上滑离开底部时，暂停自动跟随
-        b.captionScroll.setOnScrollChangeListener { _, _, _, _, _ ->
+        b.captionScroll.setOnScrollChangeListener { _: View, _: Int, _: Int, _: Int, _: Int ->
             captionAtBottom = isNearBottom(b.captionScroll)
-        }
-        b.logScroll.setOnScrollChangeListener { _, _, _, _, _ ->
-            logAtBottom = isNearBottom(b.logScroll)
-        }
-
-        val saved = Prefs.thresholdDb(requireContext())
-        b.sliderThreshold.value = saved.toFloat()
-        b.tvThreshold.text = "人声事件阈值：$saved dB（只记录高于此值的声音）"
-        b.sliderThreshold.addOnChangeListener { _, value, fromUser ->
-            if (!fromUser) return@addOnChangeListener
-            val db = value.toInt()
-            Prefs.setThresholdDb(requireContext(), db)
-            b.tvThreshold.text = "人声事件阈值：$db dB（只记录高于此值的声音）"
-            act.service?.setVoiceThreshold(db.toDouble())
         }
 
         b.btnStart.setOnClickListener { startListening() }
@@ -98,9 +69,6 @@ class ListenFragment : Fragment() {
         b.btnAlertCatchup.setOnClickListener { openAiPanel(MODE_CATCHUP) }
 
         refreshCourseHistory()
-
-        syncFromService()
-        render()
     }
 
     override fun onResume() {
@@ -131,11 +99,17 @@ class ListenFragment : Fragment() {
 
     private val sink: (String, String) -> Unit = { kind, text ->
         when (kind) {
-            "stopped" -> { isRunning = false; isPaused = false; render(); log("[停止] 录音服务已停止") }
-            "paused" -> { isPaused = true; render(); log(text) }
-            "resumed" -> { isPaused = false; render(); log(text) }
-            "danger_alert" -> { showAlert(text, danger = true); log("[危险] $text") }
-            "warning_alert" -> { showAlert(text, danger = false); log("[提醒] $text") }
+            "stopped" -> { isRunning = false; isPaused = false; render(); LogStore.append(requireContext(), "录音服务已停止") }
+            "paused" -> { isPaused = true; render(); LogStore.append(requireContext(), text) }
+            "resumed" -> { isPaused = false; render(); LogStore.append(requireContext(), text) }
+            "danger_alert" -> {
+                showAlert(text, danger = true)
+                LogStore.append(requireContext(), "[危险] $text")
+            }
+            "warning_alert" -> {
+                showAlert(text, danger = false)
+                LogStore.append(requireContext(), "[提醒] $text")
+            }
             "sentence" -> {
                 captionPartial = ""
                 captionHistory.append(text).append('\n')
@@ -143,12 +117,19 @@ class ListenFragment : Fragment() {
                     captionHistory.delete(0, captionHistory.indexOf('\n').coerceAtLeast(0) + 1)
                 }
                 renderCaption()
-                log("[句] $text")
+                LogStore.append(requireContext(), "[句] $text")
             }
-            "sentence_corrected" -> log("[修] $text")
-            "voice", "error" -> log(text)
+            "sentence_corrected" -> {
+                // 精修替换：更新字幕历史最后一行
+                val hist = captionHistory.toString()
+                val idx = hist.lastIndexOf('\n', maxOf(0, hist.length - 2))
+                captionHistory.clear().append(hist.substring(0, idx + 1)).append(text).append('\n')
+                renderCaption()
+                LogStore.append(requireContext(), "[精修] $text")
+            }
+            "voice", "error" -> LogStore.append(requireContext(), text)
             "asr_status" -> {
-                log(text)
+                LogStore.append(requireContext(), text)
                 // 引擎故障显性化：不再只留在一闪而过的日志里
                 if (text.contains("失败") || text.contains("不可用")) showAlert(text, danger = true)
             }
@@ -175,14 +156,13 @@ class ListenFragment : Fragment() {
         }
     }
 
-    /** 课程历史：用过/已存在目录的课程名 → 下拉可选 */
     private fun refreshCourseHistory() {
         if (_b == null) return
         val names = mutableSetOf<String>()
         names.addAll(Prefs.courseHistory(requireContext()))
         try {
             val base = java.io.File(requireContext().getExternalFilesDir(null), "classfox")
-            base.listFiles { f -> f.isDirectory && f.name != "keywords" }
+            base.listFiles { f -> f.isDirectory && f.name != "keywords" && f.name != "logs" }
                 ?.forEach { names.add(it.name) }
         } catch (_: Exception) {}
         if (names.isEmpty()) return
@@ -213,7 +193,7 @@ class ListenFragment : Fragment() {
         isRunning = true
         isPaused = false
         render()
-        log("▶ 启动课堂监听…")
+        LogStore.append(requireContext(), "▶ 启动课堂监听…")
         captionHistory.clear()
         captionPartial = ""
         renderCaption()
@@ -231,7 +211,7 @@ class ListenFragment : Fragment() {
         b.tvDb.text = "-90 dB"
         b.volumeBar.progress = 0
         hideAlert()
-        log("■ 停止监听")
+        LogStore.append(requireContext(), "■ 停止监听")
     }
 
     private fun togglePause() {
@@ -291,8 +271,8 @@ class ListenFragment : Fragment() {
     private var lastSummary: String? = null
     private var aiHistory = mutableListOf<LlmClient.ChatMsg>()
     private var aiSheet: com.google.android.material.bottomsheet.BottomSheetDialog? = null
-    private var aiBody: android.widget.TextView? = null
-    private var aiStatus: android.widget.TextView? = null
+    private var aiBody: TextView? = null
+    private var aiStatus: TextView? = null
 
     private fun openAiPanel(mode: Int) {
         if (!Prefs.llmReady(requireContext())) {
@@ -325,10 +305,8 @@ class ListenFragment : Fragment() {
         runAi(null)
     }
 
-    /** mode: 初次调用用 aiMode；有 followup 时按 aiMode 走对应追问 */
     private fun runAi(followup: String?) {
         val ctx = requireContext()
-        val body = aiBody ?: return
         aiStatus?.text = if (followup == null) "思考中…" else "回答中…"
         Thread {
             try {
@@ -385,18 +363,32 @@ class ListenFragment : Fragment() {
             if (bodyText.isNotEmpty()) {
                 aiBody?.text = bodyText
                 aiStatus?.text = ""
-                aiBody?.post { aiBody?.let { b -> (b.parent as? android.widget.ScrollView)?.fullScroll(View.FOCUS_DOWN) } }
+                aiBody?.post {
+                    (aiBody?.parent as? android.widget.ScrollView)?.fullScroll(View.FOCUS_DOWN)
+                }
             }
             if (statusText.isNotEmpty()) aiStatus?.text = statusText
         }
     }
 
-    private fun log(msg: String) {
+    // ---------- 字幕渲染 ----------
+    private fun isNearBottom(sv: android.widget.ScrollView): Boolean {
+        val child = sv.getChildAt(0) ?: return true
+        return child.bottom - (sv.height + sv.scrollY) < 60
+    }
+
+    private fun renderCaption() {
         if (_b == null) return
-        logCount++
-        val tv = b.tvLog
-        val new = "${System.currentTimeMillis().toString().takeLast(6)}  $msg\n"
-        if (tv.length() > 8000) tv.text = new else tv.append(new)
-        if (logAtBottom) tv.post { b.logScroll.fullScroll(View.FOCUS_DOWN) }
+        b.tvCaption.text =
+            (captionHistory.toString() + captionPartial).ifBlank { "实时字幕将在这里显示…" }
+        if (captionAtBottom) scrollToBottom()
+    }
+
+    private fun scrollToBottom() {
+        b.captionScroll.post {
+            if (_b == null) return@post
+            val child = b.captionScroll.getChildAt(0) ?: return@post
+            b.captionScroll.scrollTo(0, (child.height - b.captionScroll.height).coerceAtLeast(0))
+        }
     }
 }

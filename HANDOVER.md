@@ -8,8 +8,22 @@
 
 ## 0. 一句话状态
 
-**v0.7（2026-09-13）：UI 全面重做（Material3 深色三页架构）+ 功能框架补齐 + 模拟识别模式，已在新建 MuMu 实例（index 3, adb 127.0.0.1:16480）上完成端到端验证（截图+logcat）。工程已 git init。**
-端侧离线中文 ASR 真实链路保留（sherpa-onnx），但模拟器上 decode 仍会 native 崩溃（环境问题，见 §7-P0）；模拟器/演示用「模拟识别」开关验证全链路，真机请切回离线识别。
+**v0.10.1（2026-09-21）：真机反馈 6 项整改（字幕滚动/阈值去重/日志迁移/保存反馈/断句调优），release/ClassFoxDroid-clean-v0.10.1.apk（versionCode 17）。**
+端侧离线中文 ASR 真实链路保留（sherpa-onnx 双通道：流式 zipformer + SenseVoice 精修）；模拟器验证链路用「模拟识别」，真机用离线识别。
+
+### v0.10.x 更新（2026-09-20~21，用户真机试用反馈整改）
+- v0.9.x：课程归档（`classfox/<课程名>/`）+ 课程历史下拉 + AI 救场补齐（/chat/completions）+ 双通道精修（SenseVoice+VAD 句末重转写，见 OfflineAsrEngine / RefineEngine.kt）
+- **v0.10.1 六项整改（对应用户反馈 1~5，第 6 项 AI 暂不动）：**
+  1. **出字过快**：endpoint Rule1 静音 1.2s→**2.0s**、Rule2 0.9s→1.5s、Rule3 20s→30s（都在 OfflineAsrEngine.init() 的 EndpointConfig 一处）。代价：定稿延迟 +0.8s，partial 实时字不受影响。真机如仍偏快/偏慢，调这三个值即可。
+  2. **字幕滚动（关键修复，两层根因）**：
+     - 根因 A：androidx.core NestedScrollView 构造器在 MuMu 翻译层上 NPE（mChildHelper 未初始化，崩溃行号 297=layout-land 变体）→ 已弃用；
+     - 根因 B（真机同样会踩）：字幕 TextView `textIsSelectable="true"` 会消费 DOWN，内层 ScrollView 的 `onTouchEvent` 不执行 → 自定义 `CaptionScrollView`（framework ScrollView 子类）把 `requestDisallowInterceptTouchEvent(true)` 放在 **onInterceptTouchEvent 的 ACTION_DOWN**，UP/CANCEL 归还；
+     - 自动跟随从 `fullScroll(FOCUS_DOWN)`（依赖焦点链，不可靠）改为显式 `scrollTo(0, child.height - sv.height)`（ListenFragment.scrollToBottom）。
+     - 已验证（实例3 截图对比）：字幕区内滑动只滚字幕、外层页面不动；滑动回看后再来新句自动回底。
+  3. **阈值只留设置页**：监听页阈值卡/滑块整体删除（两个布局），设置页 sliderThreshold 保留，拖动结束 Toast「已保存」。
+  4. **日志迁移**：新建 `LogStore.kt`（单例：内存环形 500 行 + 按天落盘 `logs/log_yyyyMMdd.txt` + 保留天数 1~30 默认 7 天自动清理）。监听页日志卡删除，句子/警报/引擎状态/权限结果全部 append 到 LogStore；设置页新增「运行日志」卡：保留天数滑块 + 「查看今日日志」对话框（monospace 可选中复制）。已验证：对话框完整展示句子/警报/启停时间线。
+  5. **保存反馈**：设置页顶部固定说明「✓ 所有设置修改后立即自动保存」（fragment_settings.xml 首元素）；LLM 三个输入框失焦 Toast「已保存：AI 救场配置」；阈值/日志滑块 onStopTrackingTouch Toast；词表保存沿用原 Toast。
+  6. AI 功能未改动（用户反馈"没把握可以先放着"）。
 
 ### v0.8.x 更新（2026-09-13 下午）
 - v0.8.0：新增系统识别引擎（厂商 SpeechRecognizer，三选一：模拟/系统/离线）

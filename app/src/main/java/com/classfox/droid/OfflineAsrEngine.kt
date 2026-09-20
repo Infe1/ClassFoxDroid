@@ -98,24 +98,27 @@ class OfflineAsrEngine(
             val config = OnlineRecognizerConfig.builder()
                 .setOnlineModelConfig(model)
                 .setEnableEndpoint(true)
-                // 课堂语速快、停顿短：静音 1.2s 即断句定稿；硬上限 20s 防止长段积压
+                // 课堂停顿调优 v0.10.1：老师句中换气/短停顿(0.5~1s)不再被误判为句末，
+                // 需要 2.0s 连续静音才定稿 → 单句更长、上下文更完整、SenseVoice 精修段落更准。
+                // 代价：字幕定稿延迟约 +0.8s（partial 实时字仍即时刷新，不影响观感）。
+                // 硬上限 30s 防止长段积压。
                 .setEndpointConfig(
                     com.k2fsa.sherpa.onnx.EndpointConfig.builder()
                         .setRule1(
                             com.k2fsa.sherpa.onnx.EndpointRule.builder()
                                 .setMustContainNonSilence(true)
-                                .setMinTrailingSilence(1.2f)
+                                .setMinTrailingSilence(2.0f)
                                 .build()
                         )
                         .setRule2(
                             com.k2fsa.sherpa.onnx.EndpointRule.builder()
                                 .setMustContainNonSilence(false)
-                                .setMinTrailingSilence(0.9f)
+                                .setMinTrailingSilence(1.5f)
                                 .build()
                         )
                         .setRule3(
                             com.k2fsa.sherpa.onnx.EndpointRule.builder()
-                                .setMinUtteranceLength(20f)
+                                .setMinUtteranceLength(30f)
                                 .build()
                         )
                         .build()
