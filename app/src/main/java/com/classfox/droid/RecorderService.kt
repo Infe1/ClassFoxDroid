@@ -93,6 +93,11 @@ class RecorderService : Service() {
     private var mockEngine: MockAsrEngine? = null
     private var systemEngine: SystemAsrEngine? = null
 
+    // ---- 精修通道：SenseVoice + VAD，句末停顿后重转写替换字幕/转录 ----
+    private var refineEngine: RefineEngine? = null
+    private val refineExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val refineBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+
     // ---- 分句 / 转录 / 关键词 ----
     private val splitter = SentenceSplitter()
     private var transcriptFile: File? = null
@@ -292,6 +297,7 @@ class RecorderService : Service() {
                 paused.set(true)
                 mockEngine?.setPaused(true)
                 systemEngine?.setPaused(true)
+                try { refineEngine?.flushPending() } catch (_: Exception) {}
                 refreshNotification()
                 emit("paused", "已暂停监听")
                 return START_STICKY
@@ -317,6 +323,8 @@ class RecorderService : Service() {
         try { mockEngine?.stop() } catch (_: Exception) {}
         try { systemEngine?.stop() } catch (_: Exception) {}
         try { asrEngine?.release() } catch (_: Exception) {}
+        try { refineEngine?.release() } catch (_: Exception) {}
+        refineExecutor.shutdownNow()
         try { audioRecord?.release() } catch (_: Exception) {}
         try { wavOut?.close() } catch (_: Exception) {}
         broadcast("stopped", "录音服务已停止")
@@ -427,6 +435,21 @@ class RecorderService : Service() {
             else -> startOfflineEngine()
         }
 
+        // 精修通道（离线识别模式下启用）：SenseVoice 懒加载，失败不影响主链路
+        if (Prefs.asrMode(this) == Prefs.ASR_OFFLINE && refineEngine == null) {
+            Thread {
+                val (eng, err) = RefineEngine.create(this)
+                mainHandler.post {
+                    refineEngine = eng
+                    emit(
+                        "asr_status",
+                        if (eng != null) "高精度精修通道已就绪（语句停顿后自动精修）"
+                        else "精修通道不可用: $err（实时字幕不受影响）"
+                    )
+                }
+            }.apply { name = "classfox-refine-init" }.start()
+        }
+
         recordThread = Thread({
             val buf = ShortArray(bufSize / 2)
             rec.startRecording()
@@ -505,6 +528,71 @@ class RecorderService : Service() {
         }.apply { name = "classfox-asr-init" }.start()
     }
 
+    /**
+     * 提交一段 VAD 切出的完整语音做高精度重转写。
+     * 结果替换"最近一条未闭合的流式句子"：落盘回写 + 广播 sentence_corrected。
+     * 单线程串行 + busy 位丢弃积压，保证不拖慢主链路。
+     */
+    private fun submitRefine(samples: FloatArray) {
+        val eng = refineEngine ?: return
+        if (!refineBusy.compareAndSet(false, true)) {
+            Log.i(TAG, "精修忙，丢弃一段（${samples.size / SAMPLE_RATE}s）")
+            return
+        }
+        val startStamp = System.currentTimeMillis() - samples.size * 1000L / SAMPLE_RATE
+        refineExecutor.execute {
+            try {
+                val text = eng.transcribe(samples)
+                if (text.isNotEmpty()) {
+                    mainHandler.post { applyRefined(text, startStamp) }
+                }
+            } catch (e: Throwable) {
+                Log.e(TAG, "精修失败", e)
+            } finally {
+                refineBusy.set(false)
+            }
+        }
+    }
+
+    /** 用精修文本替换最近一条近似匹配的流式句子（转录回写 + UI 修正事件） */
+    private fun applyRefined(refined: String, startStamp: Long) {
+        val s = SentenceSplitter.normalize(refined)
+        if (s.isEmpty() || !SentenceSplitter.isMeaningful(s)) return
+        val prev = lastCommitted
+        // 找最近提交句里与精修结果最相似的一条做替换（前缀/包含/相似度任一命中）
+        val replaceable = prev != null && (
+            s.startsWith(prev!!.trimEnd('。', '，', ',', '！', '？', '!', '?')) ||
+                prev.trimEnd('。', '，', ',', '！', '？', '!', '?').startsWith(s) ||
+                isNearSimilar(prev, s)
+            )
+        if (!replaceable) {
+            // 流式漏掉的语句：作为新句补录
+            val stamp = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(startStamp))
+            try {
+                transcriptFile?.appendText("[$stamp] $s\n")
+            } catch (_: Exception) {}
+            Log.i(TAG, "精修补录: $s")
+            emit("sentence_corrected", s)
+            return
+        }
+        replaceLastTranscriptLine(prev!!, s)
+        lastCommitted = s
+        lastCommittedWasClosed = true
+        Log.i(TAG, "精修替换: $prev → $s")
+        emit("sentence_corrected", s)
+    }
+
+    private fun isNearSimilar(a: String, b: String): Boolean {
+        val x = a.trimEnd(*"。，！？!?；;、".toCharArray())
+        val y = b.trimEnd(*"。，！？!?；;、".toCharArray())
+        if (x.isEmpty() || y.isEmpty()) return false
+        // 粗粒度字重合率（交集/较短长度），够用来识别"同一句话的两种转写"
+        val setX = x.toSet()
+        var hit = 0
+        for (c in y.toSet()) if (c in setX) hit++
+        return hit * 10 >= minOf(x.toSet().size, y.toSet().size) * 7
+    }
+
     private fun processChunk(buf: ShortArray, n: Int) {
         var sum = 0.0
         for (i in 0 until n) {
@@ -527,6 +615,22 @@ class RecorderService : Service() {
             pcmBytes += bytes.size
         } catch (e: Exception) {
             Log.e(TAG, "写文件失败", e)
+        }
+
+        // 喂流式 ASR（同一份 PCM）
+        try {
+            asrEngine?.feedPcm(buf, n)
+        } catch (_: Exception) {
+            // ASR 错误不阻断录音
+        }
+
+        // 喂精修通道：VAD 攒段，切出完整语句后后台重转写
+        val refine = refineEngine
+        if (refine != null) {
+            try {
+                val segments = refine.feedPcm(buf, n)
+                for (seg in segments) submitRefine(seg)
+            } catch (_: Exception) {}
         }
 
         val now = System.currentTimeMillis()

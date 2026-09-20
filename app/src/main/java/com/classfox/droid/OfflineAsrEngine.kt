@@ -151,9 +151,9 @@ class OfflineAsrEngine(
             }
             st.acceptWaveform(floats, SAMPLE_RATE)
 
-            // 300ms 一次，降低字幕/分句延迟；仍由 isReady 门控保护 native 解码
+            // 200ms 一次解码尝试：isReady 门控下不空转；兼顾字幕延迟与 CPU 占用
             pendingSamples += n
-            if (pendingSamples >= SAMPLE_RATE * 3 / 10) {
+            if (pendingSamples >= SAMPLE_RATE * 2 / 10) {
                 pendingSamples = 0
                 if (rec.isReady(st)) {
                     rec.decode(st)
