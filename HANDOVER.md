@@ -8,11 +8,12 @@
 
 ## 0. 一句话状态
 
-**v0.10.1（2026-09-21）：真机反馈 6 项整改（字幕滚动/阈值去重/日志迁移/保存反馈/断句调优），release/ClassFoxDroid-clean-v0.10.1.apk（versionCode 17）。**
+**v0.10.2（2026-09-21）：修复切 tab 字幕消失（show/hide 复用）+ 日志快速入口（监听页「日志」按钮）。release/ClassFoxDroid-clean-v0.10.2.apk（versionCode 18）。**
 端侧离线中文 ASR 真实链路保留（sherpa-onnx 双通道：流式 zipformer + SenseVoice 精修）；模拟器验证链路用「模拟识别」，真机用离线识别。
 
 ### v0.10.x 更新（2026-09-20~21，用户真机试用反馈整改）
 - v0.9.x：课程归档（`classfox/<课程名>/`）+ 课程历史下拉 + AI 救场补齐（/chat/completions）+ 双通道精修（SenseVoice+VAD 句末重转写，见 OfflineAsrEngine / RefineEngine.kt）
+- **v0.10.2（2026-09-21 第二轮反馈）**：见 §7-P1.5 第 11/12 条修复记录。
 - **v0.10.1 六项整改（对应用户反馈 1~5，第 6 项 AI 暂不动）：**
   1. **出字过快**：endpoint Rule1 静音 1.2s→**2.0s**、Rule2 0.9s→1.5s、Rule3 20s→30s（都在 OfflineAsrEngine.init() 的 EndpointConfig 一处）。代价：定稿延迟 +0.8s，partial 实时字不受影响。真机如仍偏快/偏慢，调这三个值即可。
   2. **字幕滚动（关键修复，两层根因）**：
@@ -231,9 +232,9 @@ powershell -NoProfile -Command "Get-Process MuMuNxDevice | Select-Object Id,Main
 5. **识别重复**：曾出现同句重复、`有有` 类重复 → 已加去重（`SentenceSplitter.addSentence` 的 recent 去重 + 半句修正），**未验证效果**。
 6. **UI 观感差**：用户评价「界面确实做的也太差一点」。当前是极简单 Activity，**没有任何设计投入**。
 
-### P1.5 — v0.10.1 真机回归新增（2026-09-21 用户反馈，待修）
-11. **日志没法快速点开**：日志迁移到设置页后查看入口埋得太深（设置页要滚到底再点按钮）。候选方案（按最小改动排序）：a) 监听页顶部加一个轻量日志图标/入口按钮（不恢复日志卡，只跳转或弹对话框）；b) 设置页「运行日志」卡上移。**尚未定案，待与用户确认或自行决策后实施。**
-12. **主页字幕在切换 tab（column）后消失**：用户报告切走再切回监听页字幕区空白；且不清楚字幕能否滑动（v0.10.1 的 CaptionScrollView 修复在真机上的效果待确认）。**根因未定位**——候选方向：ListenFragment 视图重建后 `captionHistory` 丢失（成员在 Fragment 而 sink 回填只发生在 onResume 之后的新事件）；或 MainActivity 用 `replace()`+commitNow 使 fragment 状态未保留。修复时先查 MainActivity 的 tab 切换方式与 ListenFragment 状态保存策略。
+### P1.5 — v0.10.1 真机回归新增（2026-09-21 用户反馈）
+11. ~~**日志没法快速点开**~~ → **v0.10.2 已修**：`LogStore.showTodayDialog(activity)` 提为共享入口（原 SettingsFragment 私有实现删除）；监听页字幕卡右上角加轻量「日志」文字按钮（竖/横屏两布局），一键弹今日日志；设置页按钮同调共享入口。已验证（实例3 截图）。
+12. ~~**主页字幕在切换 tab 后消失**~~ → **v0.10.2 已修**：根因是 MainActivity `show()` 用 `replace()`+每次 new Fragment，切回即重建、`captionHistory` 内存态全丢。改为 add/show/hide 复用三实例（TAG listen/records/settings），隐藏期间 sink 仍挂、后台句子字幕不丢；Activity 重建路径按 bottomNav 恢复的选中 tab 归位。已验证（实例3：监听中切记录页再切回，字幕/计时/警报完整保留，截图 DIFF 证据）。**真机滑动效果仍待用户确认**（CaptionScrollView 修复在 v0.10.1，模拟器已验证滚动，真机手感未测）。
 
 ### P2 — 工程卫生
 7. **无版本控制**：`D:\Dev\ClassFoxDroid` 不是 git 仓库。**建议第一步就 `git init`**，否则改动不可回溯。

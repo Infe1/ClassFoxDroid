@@ -271,11 +271,32 @@
                 android:orientation="vertical"
                 android:padding="14dp">
 
-                <TextView
-                    style="@style/CFCardLabel"
-                    android:layout_width="wrap_content"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="实时字幕（可上滑回看）" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        style="@style/CFCardLabel"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="实时字幕（可上滑回看）" />
+
+                    <TextView
+                        android:id="@+id/btnQuickLog"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:paddingStart="12dp"
+                        android:paddingTop="4dp"
+                        android:paddingEnd="12dp"
+                        android:paddingBottom="4dp"
+                        android:text="日志"
+                        android:textColor="@color/cf_text_dim"
+                        android:textSize="12sp"
+                        android:background="?attr/selectableItemBackground" />
+                </LinearLayout>
 
                 <com.classfox.droid.CaptionScrollView
                     android:id="@+id/captionScroll"

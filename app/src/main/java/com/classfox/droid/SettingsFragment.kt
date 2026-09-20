@@ -167,7 +167,9 @@ class SettingsFragment : Fragment() {
                 toast("已保存：日志保留天数")
             }
         })
-        b.btnViewLog.setOnClickListener { showTodayLog() }
+        b.btnViewLog.setOnClickListener {
+            LogStore.showTodayDialog(requireActivity())
+        }
 
         b.toggleModel.check(
             if (Prefs.asrModel(requireContext()) == Prefs.MODEL_SMALL)
@@ -264,32 +266,5 @@ class SettingsFragment : Fragment() {
 
     private fun toast(msg: String) {
         Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
-    }
-
-    /** 今日日志对话框：内存缓冲 + 当天落盘文件合并展示，monospace 可选中便于复制反馈 */
-    private fun showTodayLog() {
-        val ctx = requireContext()
-        val day = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
-            .format(java.util.Date())
-        val file = java.io.File(
-            ctx.getExternalFilesDir(null) ?: ctx.filesDir, "logs/log_$day.txt"
-        )
-        val disk = try { file.readText().trimEnd() } catch (_: Exception) { "" }
-        val memText = LogStore.recent().joinToString("\n")
-        val content = if (disk.isNotBlank()) disk else memText.ifBlank { "今日暂无日志" }
-
-        val tv = android.widget.TextView(ctx).apply {
-            setPadding(48, 32, 48, 32)
-            textSize = 11f
-            typeface = Typeface.MONOSPACE
-            setTextColor(ContextCompat.getColor(ctx, R.color.cf_text))
-            text = content
-            setTextIsSelectable(true)
-        }
-        com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
-            .setTitle("今日日志（$day）")
-            .setView(tv)
-            .setPositiveButton("关闭", null)
-            .show()
     }
 }

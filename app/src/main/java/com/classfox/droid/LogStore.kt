@@ -68,4 +68,32 @@ object LogStore {
             }
         } catch (_: Exception) {}
     }
+
+    /**
+     * 今日日志对话框（v0.10.2 起为共享入口：设置页「查看今日日志」+ 监听页「日志」按钮）。
+     * 内存缓冲 + 当天落盘文件合并展示，monospace 可选中便于复制反馈。
+     */
+    fun showTodayDialog(activity: android.app.Activity) {
+        val ctx = activity.applicationContext
+        val day = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
+        val file = File(
+            ctx.getExternalFilesDir(null) ?: ctx.filesDir, "$DIR/log_$day.txt"
+        )
+        val disk = try { file.readText().trimEnd() } catch (_: Exception) { "" }
+        val memText = recent().joinToString("\n")
+        val content = if (disk.isNotBlank()) disk else memText.ifBlank { "今日暂无日志" }
+
+        val tv = android.widget.TextView(activity).apply {
+            setPadding(48, 32, 48, 32)
+            textSize = 11f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setTextIsSelectable(true)
+        }
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(activity)
+            .setTitle("今日日志（$day）")
+            .setView(tv)
+            .setPositiveButton("关闭", null)
+            .show()
+        tv.text = content
+    }
 }

@@ -68,12 +68,21 @@ class MainActivity : AppCompatActivity() {
             Context.BIND_AUTO_CREATE
         )
 
-        if (savedInstanceState == null) show(ListenFragment())
+        if (savedInstanceState == null) {
+            show(ListenFragment(), TAG_LISTEN)
+        } else {
+            // 重建路径：FM 自动恢复的三个 fragment 均可见，按恢复的选中 tab 归位
+            when (binding.bottomNav.selectedItemId) {
+                R.id.nav_records -> show(RecordsFragment(), TAG_RECORDS)
+                R.id.nav_settings -> show(SettingsFragment(), TAG_SETTINGS)
+                else -> show(ListenFragment(), TAG_LISTEN)
+            }
+        }
         binding.bottomNav.setOnItemSelectedListener { item ->
             when (item.itemId) {
-                R.id.nav_listen -> show(ListenFragment())
-                R.id.nav_records -> show(RecordsFragment())
-                R.id.nav_settings -> show(SettingsFragment())
+                R.id.nav_listen -> show(ListenFragment(), TAG_LISTEN)
+                R.id.nav_records -> show(RecordsFragment(), TAG_RECORDS)
+                R.id.nav_settings -> show(SettingsFragment(), TAG_SETTINGS)
             }
             true
         }
@@ -88,10 +97,19 @@ class MainActivity : AppCompatActivity() {
                 android.content.pm.ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
     }
 
-    private fun show(f: Fragment) {
-        supportFragmentManager.beginTransaction()
-            .replace(R.id.container, f)
-            .commit()
+    /**
+     * tab 切换用 add/show/hide 复用实例（v0.10.2 修复"切 tab 后字幕消失"）。
+     * 原 replace+new 会重建 ListenFragment，captionHistory 内存态全丢；
+     * show/hide 同时让监听页隐藏期间 sink 仍挂着，后台句子的字幕不丢。
+     * Activity 重建时 FragmentManager 会把三个都恢复为可见，这里按当前 tab 重新归位。
+     */
+    private fun show(f: Fragment, tag: String) {
+        val fm = supportFragmentManager
+        val target = fm.findFragmentByTag(tag) ?: f
+        val tx = fm.beginTransaction()
+        fm.fragments.forEach { if (it !== target) tx.hide(it) }
+        if (target.isAdded) tx.show(target) else tx.add(R.id.container, target, tag)
+        tx.commit()
     }
 
     override fun onDestroy() {
@@ -104,5 +122,11 @@ class MainActivity : AppCompatActivity() {
         listenSink = null
         stateSink = null
         super.onDestroy()
+    }
+
+    private companion object {
+        const val TAG_LISTEN = "listen"
+        const val TAG_RECORDS = "records"
+        const val TAG_SETTINGS = "settings"
     }
 }

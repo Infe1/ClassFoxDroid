@@ -60,6 +60,10 @@ class ListenFragment : Fragment() {
             captionAtBottom = isNearBottom(b.captionScroll)
         }
 
+        b.btnQuickLog.setOnClickListener {
+            LogStore.showTodayDialog(requireActivity())
+        }
+
         b.btnStart.setOnClickListener { startListening() }
         b.btnPause.setOnClickListener { togglePause() }
         b.btnStop.setOnClickListener { stopListening() }
