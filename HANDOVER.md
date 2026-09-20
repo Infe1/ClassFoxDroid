@@ -126,6 +126,8 @@ adb -s <serial> logcat -d -s ClassFoxAsr:I ClassFoxRec:I | tail -40
 - **原始完整历史归档**：`D:\GitRemotes\ClassFoxDroid-full-history.git` —— 2026-09-21 大文件清理**前**的未重写历史（含两个大模型二进制的全部历史版本），只读保存。
 - 异地冷备：`git bundle create ClassFoxDroid_$(date +%Y%m%d).bundle --all` 单文件放网盘/U盘；恢复 `git clone`。重写后 bundle 约 37MB。
 - `release/*.apk` 不进 git，历来做磁盘直存。
+- **Release 约定**：版本名用 beta（如 `v0.10.2-beta`），tag 固定 `preview`，勾 pre-release；Release 网页创建与 APK 附件上传由用户完成（账号零操作约束）。
+- ⚠️ **公开发布前置门禁（2026-09-21 用户要求，未完成不得转公开）**：入库文档含个人信息（用户名/机器名 `Infe1`、`Infel`、`ClassAssistant`；本机路径 `D:\Dev`、`C:\Users\Infel`、`D:\GitRemotes`、MuMu 路径、端口 16480、GitHub 固定 IP；本文件自身即内部交接文档）。公开发布前必须全面排查清洗并向用户确认完成，交接者/后续会话勿跳过。
 - **大文件清理（2026-09-21）**：`sensevoice/model.int8.onnx`(228MB)、`zh2025/encoder.int8.onnx`(154MB) 超 GitHub 单文件 100MB 硬限，已用 filter-branch 从全部历史移除（pack 306→36.6MB），工作区文件**仍在磁盘**（已入 .gitignore）。⚠️ 教训：filter-branch 结尾 `read-tree -u` 会把重写结果同步到工作区，重写前必须先归档历史——本次靠归档库恢复了被带掉的文件。
 - **重建开发环境时需手动取回的两个模型**（clone 后 assets 里没有）：
   - `app/src/main/assets/sensevoice/model.int8.onnx`（228MB）：sherpa-onnx SenseVoice Small int8，hf-mirror.com/csukuangfj/k2fsa-zipformer-chinese-english-mixed（或 sherpa-onnx 官方 sense-voice release）下载后重命名
