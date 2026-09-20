@@ -13,3 +13,8 @@ model_zh2025/
 selftest_classroom.wav
 model_sv/
 selftest_wav/
+
+# 超过 GitHub 100MB 单文件上限的大模型二进制：不入 git，磁盘直存（v0.10.2 起）
+# 获取方式见 HANDOVER.md §2 资产清单
+app/src/main/assets/sensevoice/model.int8.onnx
+app/src/main/assets/zh2025/encoder.int8.onnx
