@@ -120,10 +120,17 @@ adb -s <serial> logcat -d -s ClassFoxAsr:I ClassFoxRec:I | tail -40
 - `ClassFoxRec`：`句:` / `关键词命中:` / `录音开始/结束` / `WAV 完成` ← **端到端铁证**
 - `ClassFoxAsr`：模型解包、`识别中:`、初始化结果
 
-### 3.4 版本备份（无账号本地远程，2026-09-21 起）
-- 工程 remote `backup` → 本机裸仓库 `D:\GitRemotes\ClassFoxDroid.git`（零账号零权限，防误删/坏提交）。日常提交后随手 `git push backup main`。
-- **异地备份（防整盘故障）**：`git bundle create ClassFoxDroid_$(date +%Y%m%d).bundle --all`，把单文件 bundle 放进网盘同步目录/U盘即可；恢复：`git clone ClassFoxDroid_xxx.bundle ClassFoxDroid`。bundle 约 300MB（含模型资产）。
+### 3.4 版本备份（2026-09-21 起三套并存）
+- **GitHub（异地）**：remote `github` → `git@github.com:Infe1/ClassFoxDroid.git`（SSH 直连 IP 配置见 `~/.ssh/config`，Deploy key 只授权此仓库）。推送后作为异地主备份。
+- **本机裸仓库**：remote `backup` → `D:\GitRemotes\ClassFoxDroid.git`（零账号，防误删/坏提交）。日常提交后 `git push backup main`（+ GitHub）。
+- **原始完整历史归档**：`D:\GitRemotes\ClassFoxDroid-full-history.git` —— 2026-09-21 大文件清理**前**的未重写历史（含两个大模型二进制的全部历史版本），只读保存。
+- 异地冷备：`git bundle create ClassFoxDroid_$(date +%Y%m%d).bundle --all` 单文件放网盘/U盘；恢复 `git clone`。重写后 bundle 约 37MB。
 - `release/*.apk` 不进 git，历来做磁盘直存。
+- **大文件清理（2026-09-21）**：`sensevoice/model.int8.onnx`(228MB)、`zh2025/encoder.int8.onnx`(154MB) 超 GitHub 单文件 100MB 硬限，已用 filter-branch 从全部历史移除（pack 306→36.6MB），工作区文件**仍在磁盘**（已入 .gitignore）。⚠️ 教训：filter-branch 结尾 `read-tree -u` 会把重写结果同步到工作区，重写前必须先归档历史——本次靠归档库恢复了被带掉的文件。
+- **重建开发环境时需手动取回的两个模型**（clone 后 assets 里没有）：
+  - `app/src/main/assets/sensevoice/model.int8.onnx`（228MB）：sherpa-onnx SenseVoice Small int8，hf-mirror.com/csukuangfj/k2fsa-zipformer-chinese-english-mixed（或 sherpa-onnx 官方 sense-voice release）下载后重命名
+  - `app/src/main/assets/zh2025/encoder.int8.onnx`（154MB）：`sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30` 的 encoder，hf-mirror.com/csukuangfj 同名仓库
+  - 校验：构建后设置页「引擎诊断」能初始化即文件正确；其余 assets（zh14m 全套、sensevoice tokens、zh2025 decoder/joiner/tokens）都在 git 里
 
 ---
 
