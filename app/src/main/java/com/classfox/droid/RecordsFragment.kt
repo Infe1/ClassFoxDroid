@@ -50,13 +50,16 @@ class RecordsFragment : Fragment() {
     }
 
     private sealed class Row {
-        class Header(val course: String, val count: Int) : Row()
+        /** level 0=课程 1=日期；collapsed 组不展开子行，点 header 切换 */
+        class Header(val course: String, val day: String, val level: Int, val count: Int) : Row()
         class FileRow(val file: File, val isAudio: Boolean) : Row()
     }
 
     private var _b: FragmentRecordsBinding? = null
     private val b get() = _b!!
     private val rows = mutableListOf<Row>()
+    /** 折叠状态：key = "课程|日期"（课程级 key = "课程|"），默认展开 */
+    private val collapsed = mutableSetOf<String>()
     private var player: MediaPlayer? = null
 
     override fun onCreateView(
@@ -87,6 +90,15 @@ class RecordsFragment : Fragment() {
         super.onDestroyView()
     }
 
+    /** 从文件名提取日期（class_transcript_2026-09-20_* / classfox_20260920_* / summary_*_2026-09-20_*），无则 lastModified */
+    private fun dayOf(f: File): String {
+        val m = Regex("(\\d{4})-(\\d{2})-(\\d{2})").find(f.name)
+        if (m != null) return m.value
+        val m2 = Regex("(\\d{4})(\\d{2})(\\d{2})_\\d{6}").find(f.name)
+        if (m2 != null) return "${m2.groupValues[1]}-${m2.groupValues[2]}-${m2.groupValues[3]}"
+        return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(f.lastModified()))
+    }
+
     private fun reload() {
         rows.clear()
         val base = File(requireContext().getExternalFilesDir(null), "classfox")
@@ -103,13 +115,42 @@ class RecordsFragment : Fragment() {
             val loose = base.listFiles { f -> f.isFile && f.extension in setOf("txt", "wav", "md") }
             if (!loose.isNullOrEmpty()) groups["未分类（旧记录）"] = loose.toMutableList()
         }
+        // 三级结构：课程 → 日期 → 文件；折叠状态在记忆集合里，reload 后保持
         for ((course, files) in groups) {
             files.sortByDescending { it.lastModified() }
-            rows.add(Row.Header(course, files.size))
-            for (f in files) rows.add(Row.FileRow(f, f.extension == "wav"))
+            val byDay = linkedMapOf<String, MutableList<File>>()
+            for (f in files) byDay.getOrPut(dayOf(f)) { mutableListOf() }.add(f)
+            rows.add(Row.Header(course, "", 0, files.size))
+            for ((day, dayFiles) in byDay) {
+                val dayKey = "$course|$day"
+                rows.add(Row.Header(course, day, 1, dayFiles.size))
+                if (dayKey in collapsed) continue
+                for (f in dayFiles) rows.add(Row.FileRow(f, f.extension == "wav"))
+            }
         }
         b.tvEmpty.visibility = if (rows.isEmpty()) View.VISIBLE else View.GONE
         b.recycler.adapter?.notifyDataSetChanged()
+    }
+
+    /** 点 header：切换折叠并重建行；course 级折叠其下所有日期组 */
+    private fun toggleHeader(pos: Int) {
+        when (val row = rows[pos]) {
+            is Row.Header -> {
+                if (row.level == 1) {
+                    val key = "${row.course}|${row.day}"
+                    if (key in collapsed) collapsed.remove(key) else collapsed.add(key)
+                } else {
+                    val prefix = "${row.course}|"
+                    val anyOpen = rows.any { it is Row.Header && it.level == 1 && it.course == row.course && "${it.course}|${it.day}" !in collapsed }
+                    if (anyOpen) rows.filterIsInstance<Row.Header>().filter { it.level == 1 && it.course == row.course }
+                        .forEach { collapsed.add("${it.course}|${it.day}") }
+                    else rows.filterIsInstance<Row.Header>().filter { it.level == 1 && it.course == row.course }
+                        .forEach { collapsed.remove("${it.course}|${it.day}") }
+                }
+                reload()
+            }
+            else -> {}
+        }
     }
 
     private fun showTranscript(f: File) {
@@ -217,8 +258,18 @@ class RecordsFragment : Fragment() {
             when (val row = rows[pos]) {
                 is Row.Header -> {
                     h as HeaderVH
-                    h.title.text = "📚 ${row.course}"
-                    h.count.text = "${row.count} 条"
+                    if (row.level == 0) {
+                        h.title.text = "📚 ${row.course}"
+                        h.count.text = "${row.count} 条"
+                        h.arrow.text = "▾"
+                        h.title.setTextColor(ContextCompat.getColor(requireContext(), R.color.cf_primary))
+                    } else {
+                        h.title.text = "　📅 ${row.day}"
+                        h.count.text = "${row.count} 条"
+                        h.arrow.text = if ("${row.course}|${row.day}" in collapsed) "▸" else "▾"
+                        h.title.setTextColor(ContextCompat.getColor(requireContext(), R.color.cf_text))
+                    }
+                    h.row.setOnClickListener { toggleHeader(h.bindingAdapterPosition) }
                 }
                 is Row.FileRow -> {
                     h as FileVH
@@ -245,6 +296,8 @@ class RecordsFragment : Fragment() {
     private class HeaderVH(v: View) : RecyclerView.ViewHolder(v) {
         val title: TextView = v.findViewById(R.id.headerTitle)
         val count: TextView = v.findViewById(R.id.headerCount)
+        val arrow: TextView = v.findViewById(R.id.headerArrow)
+        val row: View = v
     }
 
     private class FileVH(v: View) : RecyclerView.ViewHolder(v) {
