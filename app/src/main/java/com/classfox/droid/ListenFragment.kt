@@ -32,9 +32,7 @@ class ListenFragment : Fragment() {
     private var isRunning = false
     private var isPaused = false
 
-    // 字幕历史 + 手动回滚：停在底部才自动跟随
-    private val captionHistory = StringBuilder()
-    private var captionPartial = ""
+    // 手动回滚：字幕停在底部才自动跟随；历史/partial 存进程级 CaptionBuffer（抗重建）
     private var captionAtBottom = true
 
     private val permLauncher =
@@ -101,7 +99,7 @@ class ListenFragment : Fragment() {
         isPaused = s.isPaused()
     }
 
-    private val sink: (String, String) -> Unit = { kind, text ->
+    private val sink: (String, String, String?) -> Unit = { kind, text, orig ->
         when (kind) {
             "stopped" -> { isRunning = false; isPaused = false; render(); LogStore.append(requireContext(), "录音服务已停止") }
             "paused" -> { isPaused = true; render(); LogStore.append(requireContext(), text) }
@@ -115,19 +113,19 @@ class ListenFragment : Fragment() {
                 LogStore.append(requireContext(), "[提醒] $text")
             }
             "sentence" -> {
-                captionPartial = ""
-                captionHistory.append(text).append('\n')
-                if (captionHistory.length > 4000) {
-                    captionHistory.delete(0, captionHistory.indexOf('\n').coerceAtLeast(0) + 1)
-                }
+                CaptionBuffer.partial = ""
+                CaptionBuffer.appendSentence(text)
                 renderCaption()
                 LogStore.append(requireContext(), "[句] $text")
             }
             "sentence_corrected" -> {
-                // 精修替换：更新字幕历史最后一行
-                val hist = captionHistory.toString()
-                val idx = hist.lastIndexOf('\n', maxOf(0, hist.length - 2))
-                captionHistory.clear().append(hist.substring(0, idx + 1)).append(text).append('\n')
+                // 精修结果按服务端给的原句匹配替换；orig 空 = 流式漏句的补录 → 追加。
+                // 找不到原句（已被裁剪）→ 跳过，绝不追加，杜绝原句/精修句同屏双显。
+                if (orig.isNullOrEmpty()) {
+                    CaptionBuffer.appendSentence(text)
+                } else {
+                    CaptionBuffer.replaceLine(orig, text)
+                }
                 renderCaption()
                 LogStore.append(requireContext(), "[精修] $text")
             }
@@ -138,7 +136,7 @@ class ListenFragment : Fragment() {
                 if (text.contains("失败") || text.contains("不可用")) showAlert(text, danger = true)
             }
             "partial" -> {
-                captionPartial = if (text.isEmpty()) "" else "$text"
+                CaptionBuffer.partial = if (text.isEmpty()) "" else "$text"
                 renderCaption()
             }
         }
@@ -198,8 +196,7 @@ class ListenFragment : Fragment() {
         isPaused = false
         render()
         LogStore.append(requireContext(), "▶ 启动课堂监听…")
-        captionHistory.clear()
-        captionPartial = ""
+        CaptionBuffer.clear()
         renderCaption()
     }
 
@@ -383,8 +380,12 @@ class ListenFragment : Fragment() {
 
     private fun renderCaption() {
         if (_b == null) return
-        b.tvCaption.text =
-            (captionHistory.toString() + captionPartial).ifBlank { "实时字幕将在这里显示…" }
+        // 保守模式的字幕正文 = 精修定稿句；流式 partial 无标点且必被精修覆盖，
+        // 同屏展示即"即出+精修双显"，故只在激进模式显示 partial（延迟预算 5~10s）
+        val showPartial =
+            Prefs.splitMode(requireContext()) == SentenceSplitter.MODE_SPLIT_FAST
+        val body = CaptionBuffer.history.toString() + if (showPartial) CaptionBuffer.partial else ""
+        b.tvCaption.text = body.ifBlank { "实时字幕将在这里显示…" }
         if (captionAtBottom) scrollToBottom()
     }
 

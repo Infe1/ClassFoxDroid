@@ -27,8 +27,14 @@ class RefineEngine private constructor(
         private const val SV_DIR = "sherpa-onnx-sense-voice-int8-2024-07-17"
         private const val SAMPLE_RATE = 16000
 
-        /** 从 assets 解压模型（仅首次），初始化失败返回 null 并给出错误文案 */
-        fun create(context: Context, onStatus: (String) -> Unit = {}): Pair<RefineEngine?, String?> {
+        /** 从 assets 解压模型（仅首次），初始化失败返回 null 并给出错误文案。
+         *  minSilenceSec/threshold 为 VAD 分段参数，默认 0.75s/0.5；诊断实验可传不同值对比。 */
+        fun create(
+            context: Context,
+            onStatus: (String) -> Unit = {},
+            minSilenceSec: Float = 0.75f,
+            threshold: Float = 0.5f
+        ): Pair<RefineEngine?, String?> {
             return try {
                 val dir = ensureModels(context)
                 val t0 = System.currentTimeMillis()
@@ -55,8 +61,8 @@ class RefineEngine private constructor(
                         .setSileroVadModelConfig(
                             SileroVadModelConfig.builder()
                                 .setModel(ensureVad(context).absolutePath)
-                                .setThreshold(0.5f)
-                                .setMinSilenceDuration(0.75f)
+                                .setThreshold(threshold)
+                                .setMinSilenceDuration(minSilenceSec)
                                 .setWindowSize(512)
                                 .build()
                         )

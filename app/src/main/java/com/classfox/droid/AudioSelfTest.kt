@@ -81,8 +81,8 @@ object AudioSelfTest {
         }.apply { name = "classfox-selftest"; start() }
     }
 
-    /** 解析 WAV（RIFF/16bit PCM），重采样到 16k 单声道，返回 [-1,1] 浮点 */
-    private fun decodeWav(ctx: Context, uri: Uri): FloatArray {
+    /** 解析 WAV（RIFF/16bit PCM），重采样到 16k 单声道，返回 [-1,1] 浮点；诊断广播复用 */
+    internal fun decodeWav(ctx: Context, uri: Uri): FloatArray {
         val bytes = try {
             ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return FloatArray(0)
         } catch (e: Exception) {

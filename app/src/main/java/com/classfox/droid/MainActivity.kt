@@ -22,8 +22,8 @@ class MainActivity : AppCompatActivity() {
     var service: RecorderService? = null
         private set
 
-    /** 监听页注册的文本事件 sink（句/警报/字幕/状态） */
-    var listenSink: ((kind: String, text: String) -> Unit)? = null
+    /** 监听页注册的文本事件 sink（句/警报/字幕/状态）；orig 仅 sentence_corrected 携带被替换原句 */
+    var listenSink: ((kind: String, text: String, orig: String?) -> Unit)? = null
 
     /** 监听页注册的状态 sink（音量/计时/文件名） */
     var stateSink: ((rms: Double, secs: Int, file: String?) -> Unit)? = null
@@ -49,7 +49,8 @@ class MainActivity : AppCompatActivity() {
         override fun onReceive(ctx: Context?, intent: Intent?) {
             val kind = intent?.getStringExtra(RecorderService.EXTRA_EVENT) ?: return
             val text = intent.getStringExtra(RecorderService.EXTRA_TEXT) ?: ""
-            listenSink?.invoke(kind, text)
+            val orig = intent.getStringExtra(RecorderService.EXTRA_TEXT_ORIG)
+            listenSink?.invoke(kind, text, orig)
         }
     }
 

@@ -55,6 +55,7 @@ class RecorderService : Service() {
         const val ACTION_EVENT = "com.classfox.droid.EVENT"
         const val EXTRA_EVENT = "event"
         const val EXTRA_TEXT = "text"
+        const val EXTRA_TEXT_ORIG = "text_orig"
     }
 
     inner class RecBinder : Binder() {
@@ -100,6 +101,10 @@ class RecorderService : Service() {
 
     // ---- 分句 / 转录 / 关键词 ----
     private val splitter = SentenceSplitter()
+
+    /** 当前分句模式（与 splitter 同步维护；保守模式下流式残留不冲刷，见 ingestAsrText）。
+     *  初值在 onCreate 赋（服务字段初始化时 Context 尚未 attach，不能读 Prefs）。 */
+    @Volatile private var splitMode = SentenceSplitter.MODE_MERGE_CONSERVATIVE
     private var transcriptFile: File? = null
     private var lastCommitted: String? = null
     private var lastCommittedWasClosed = false
@@ -116,7 +121,7 @@ class RecorderService : Service() {
     fun getVoiceThreshold(): Double = voiceThresholdDb
 
     /** 分句模式切换(0=激进切分, 1=保守合并)，运行中切换即冲刷残留 */
-    fun setSplitMode(mode: Int) = splitter.setMode(mode)
+    fun setSplitMode(mode: Int) { splitMode = mode; splitter.setMode(mode) }
 
     fun reloadKeywords() {
         val (d, w) = Keywords.load(this)
@@ -143,7 +148,10 @@ class RecorderService : Service() {
         if (!isFinal) return
 
         val sentences = splitter.feed(text).toMutableList()
-        sentences.addAll(splitter.flushRemaining())
+        // 仅激进模式冲刷残留。保守模式（v0.10.2 真机重复/乱序根因）：冲刷会把无标点的
+        // 流式半句整段写进转录，随后同段音频的精修正文再补一遍 → 内容双份、时间戳乱序。
+        // 保守模式的未闭合尾巴交给精修通道（SenseVoice 带标点、按音频时间落盘）。
+        if (splitMode == SentenceSplitter.MODE_SPLIT_FAST) sentences.addAll(splitter.flushRemaining())
         for (s in sentences) commitSentence(s)
     }
 
@@ -159,7 +167,7 @@ class RecorderService : Service() {
             replaceLastTranscriptLine(prev, s)
             lastCommitted = s
             lastCommittedWasClosed = isClosedSentence(s)
-            emit("sentence_corrected", s)
+            emit("sentence_corrected", s, prev)
             return
         }
 
@@ -284,7 +292,8 @@ class RecorderService : Service() {
         createChannel()
         reloadKeywords()
         voiceThresholdDb = Prefs.get(this).getInt(Prefs.KEY_THRESHOLD, -30).toDouble()
-        splitter.setMode(Prefs.splitMode(this))
+        splitMode = Prefs.splitMode(this)
+        splitter.setMode(splitMode)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -566,7 +575,7 @@ class RecorderService : Service() {
                 isNearSimilar(prev, s)
             )
         if (!replaceable) {
-            // 流式漏掉的语句：作为新句补录
+            // 流式漏掉的语句：作为新句补录（orig 空 → UI 追加而非替换）
             val stamp = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(startStamp))
             try {
                 transcriptFile?.appendText("[$stamp] $s\n")
@@ -579,7 +588,7 @@ class RecorderService : Service() {
         lastCommitted = s
         lastCommittedWasClosed = true
         Log.i(TAG, "精修替换: $prev → $s")
-        emit("sentence_corrected", s)
+        emit("sentence_corrected", s, prev)
     }
 
     private fun isNearSimilar(a: String, b: String): Boolean {
@@ -694,13 +703,15 @@ class RecorderService : Service() {
         }
     }
 
-    private fun emit(kind: String, text: String) = broadcast(kind, text)
+    private fun emit(kind: String, text: String, orig: String? = null) = broadcast(kind, text, orig)
 
-    private fun broadcast(kind: String, text: String) {
+    private fun broadcast(kind: String, text: String, orig: String? = null) {
         val i = Intent(ACTION_EVENT)
         i.setPackage(packageName)
         i.putExtra(EXTRA_EVENT, kind)
         i.putExtra(EXTRA_TEXT, text)
+        // sentence_corrected 附带被替换的原句：UI 按句匹配替换，避免错行后原句残留双显
+        if (orig != null) i.putExtra(EXTRA_TEXT_ORIG, orig)
         sendBroadcast(i)
     }
 

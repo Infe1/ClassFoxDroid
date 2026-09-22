@@ -89,11 +89,14 @@ object LogStore {
             typeface = android.graphics.Typeface.MONOSPACE
             setTextIsSelectable(true)
         }
+        // 包一层 ScrollView 并在填充后直接落到最底部：最新日志在最后，免长按翻找
+        val scroll = android.widget.ScrollView(activity).apply { addView(tv) }
         com.google.android.material.dialog.MaterialAlertDialogBuilder(activity)
             .setTitle("今日日志（$day）")
-            .setView(tv)
+            .setView(scroll)
             .setPositiveButton("关闭", null)
             .show()
         tv.text = content
+        scroll.post { scroll.fullScroll(android.view.View.FOCUS_DOWN) }
     }
 }

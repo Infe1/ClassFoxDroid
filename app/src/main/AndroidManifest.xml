@@ -28,5 +28,14 @@
             android:name=".RecorderService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- 实验用诊断广播（精度调参），详见 DiagAsrReceiver 注释 -->
+        <receiver
+            android:name=".DiagAsrReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.classfox.droid.DIAG_ASR" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

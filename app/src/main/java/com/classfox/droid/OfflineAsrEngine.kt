@@ -71,7 +71,11 @@ class OfflineAsrEngine(
     }
 
     /** 初始化识别器;失败返回错误文案 */
-    fun init(): String? {
+    /**
+     * 初始化；rule1SilenceSec = 句末静音断句阈值（秒），默认 2.0。
+     * 提为参数供精度实验用（诊断广播传不同值对比），服务端不传即默认。
+     */
+    fun init(rule1SilenceSec: Float = 2.0f): String? {
         try {
             val dir = ensureModel() ?: return "模型解包失败"
             val enc = File(dir, spec.encoder).absolutePath
@@ -107,7 +111,7 @@ class OfflineAsrEngine(
                         .setRule1(
                             com.k2fsa.sherpa.onnx.EndpointRule.builder()
                                 .setMustContainNonSilence(true)
-                                .setMinTrailingSilence(2.0f)
+                                .setMinTrailingSilence(rule1SilenceSec)
                                 .build()
                         )
                         .setRule2(

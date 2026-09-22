@@ -15,14 +15,15 @@ object LlmClient {
 
     class ChatMsg(val role: String, val content: String)
 
-    /** 阻塞式调用，务必在后台线程执行 */
+    /** 阻塞式调用，务必在后台线程执行；timeoutMs 供长任务（AI 总结）放宽读超时 */
     fun chat(
         ctx: android.content.Context,
         system: String,
         user: String,
         history: List<ChatMsg> = emptyList(),
         maxTokens: Int = 800,
-        temperature: Double = 0.3
+        temperature: Double = 0.3,
+        timeoutMs: Int = 60_000
     ): String {
         val base = Prefs.llmBase(ctx)
         val model = Prefs.llmModel(ctx)
@@ -47,7 +48,7 @@ object LlmClient {
             conn = (URL(base.trimEnd('/') + "/chat/completions").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 15000
-                readTimeout = 60000
+                readTimeout = timeoutMs
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json")
                 if (key.isNotEmpty()) setRequestProperty("Authorization", "Bearer $key")
