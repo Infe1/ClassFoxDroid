@@ -8,7 +8,20 @@
 
 ## 0. 一句话状态
 
-**v0.10.2（2026-09-21）：修复切 tab 字幕消失（show/hide 复用）+ 日志快速入口（监听页「日志」按钮）。release/ClassFoxDroid-clean-v0.10.2.apk（versionCode 18）。**
+**v0.10.3（2026-09-22）：字幕双显/消失根因修复（保守模式纯精修链路）+ AI 课堂笔记 + 精度实验定参。提交 e43c730，已推 GitHub+backup。**
+
+### v0.10.3（2026-09-22，用户真机数据回归 + 精度实验）
+- **实验工具**：`DiagAsrReceiver`（manifest exported，广播 `com.classfox.droid.DIAG_ASR`，须加 `-f 0x1000000` 且 app 已启动；MuMu 后台广播被拦）。参数：`--es wav --es out --ef silence(默认2.0) --ei mode(1保守) --ei stream --ei refine --ef vadsil(0.75) --ef vadthr(0.5)`。流式读盘防 OOM（60MB WAV 整载会 OOM）；输出带音频相对时间戳（注意 `Date()` 本地时区，分析时 +8h 校正）。
+- **精度实验结论**（组成原理 31 分钟真实课堂 WAV vs 桌面端 raw 参考，`cer.py` 分分钟对齐）：
+  - 参考文本自身有漏录 gap（15:39 段桌面几乎无输出）与专名噪声（R4→二四/儿四），绝对 CER 只能看趋势；
+  - SenseVoice 精修通道召回式 CER ≈33%，VAD 0.75s vs 1.2s 无显著差异 → **保留 0.75s（延迟更低）**；
+  - 逐句人工对照：精修输出质量接近桌面云识别水平（含标点/ITN）。
+- **真机转录重复/乱序根因（v0.10.1~0.10.2 手机数据实锤）**：保守模式下 `ingestAsrText` 每个 ASR final 都调 `flushRemaining()`，把无标点流式半句整段写进转录；同段音频的精修正文随后再补一遍 → 转录内容双份、时间戳乱序（手机日志 15:31:48 那条 100 字 blob 即流式垃圾）。**修复：仅激进模式冲刷残留；保守模式未闭合尾巴交给精修通道**。UI 同步：保守模式不渲染流式 partial（杜绝"即出+精修"双显）。
+- **字幕抗重建**：历史/partial 迁入 `CaptionBuffer` 进程级单例（tab 切换 show/hide 已由 v0.10.2 保活，Activity 重建也不丢）。
+- **精修替换防错行**：`sentence_corrected` 广播新增 `text_orig`（被替换原句），UI 按句匹配替换（`CaptionBuffer.replaceLine`），找不到原句即跳过、绝不追加。
+- **AI 课堂笔记**（对齐桌面版 `generate_class_summary` 6 章节提示词）：记录页转录对话框「AI 总结」→ 后台生成 → 存课程目录 `summary_<转录名>.md` → 记录页黄色「总结」类型点开查看。`LlmClient.chat` 增加 `timeoutMs`（总结 180s）。空内容防护（思考型模型截断→报错不写文件）。
+- **已验证**（实例3，手机真实数据 43 文件 md5 一致拷入）：模拟两模式字幕流、切 tab 字幕保留、日志打开即到底、AI 总结真实调用 DeepSeek 生成 6KB 笔记（内容与课堂例题吻合）。**注意**：shell 拷入的目录属主是 shell，app 写入 EACCES——测试环境需 `chmod -R 777`；真机 app 自建目录无此问题。
+- **坑**：服务字段初始化器读 `Prefs` 会 NPE（Context 未 attach）→ 必须挪 `onCreate`（v0.10.3 已修）。
 端侧离线中文 ASR 真实链路保留（sherpa-onnx 双通道：流式 zipformer + SenseVoice 精修）；模拟器验证链路用「模拟识别」，真机用离线识别。
 
 ### v0.10.x 更新（2026-09-20~21，用户真机试用反馈整改）
