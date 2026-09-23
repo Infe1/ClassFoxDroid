@@ -38,6 +38,12 @@ class DiagAsrReceiver : BroadcastReceiver() {
         val wavPath = i.getStringExtra("wav") ?: return
         val outPath = i.getStringExtra("out")
             ?: (ctx.getExternalFilesDir(null)!!.absolutePath + "/diag_out.txt")
+        // 安全收敛：receiver 是 exported 的，诊断输出只允许写应用私有目录，避免被利用任意写文件
+        val appBase = (ctx.getExternalFilesDir(null) ?: ctx.filesDir).canonicalPath
+        if (!File(outPath).canonicalPath.startsWith(appBase + File.separator)) {
+            Log.e(TAG, "out 路径不在应用私有目录内，拒绝: $outPath")
+            return
+        }
         val silence = i.getFloatExtra("silence", 2.0f)
         val mode = i.getIntExtra("mode", SentenceSplitter.MODE_MERGE_CONSERVATIVE)
         val doRefine = i.getIntExtra("refine", 1) == 1

@@ -49,7 +49,7 @@ object LogStore {
     }
 
     /** 内存缓冲快照（最近 500 行） */
-    fun recent(): List<String> = synchronized(mem) { mem.toList() }
+    @Synchronized fun recent(): List<String> = mem.toList()  // 与 append 同一把锁（append 是 @Synchronized 锁单例）
 
     /** 当天及往期日志文件列表（旧→新） */
     fun files(ctx: Context): List<File> = try {

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 云备份规则（Android 11 及以下）：排除存 LLM Key 的 SharedPreferences，避免 Key 随备份外泄 -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="classfox_prefs.xml" />
+</full-backup-content>

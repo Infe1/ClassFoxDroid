@@ -98,6 +98,8 @@ class RecorderService : Service() {
     private var refineEngine: RefineEngine? = null
     private val refineExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val refineBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+    /** onDestroy 后置位：精修引擎异步初始化回主线程时若服务已销毁，直接释放，避免 native 泄漏 */
+    @Volatile private var destroyed = false
 
     // ---- 分句 / 转录 / 关键词 ----
     private val splitter = SentenceSplitter()
@@ -144,7 +146,7 @@ class RecorderService : Service() {
     fun ingestAsrText(text: String, isFinal: Boolean) {
         if (!running.get() || paused.get()) return
         val partial = SentenceSplitter.normalize(text)
-        if (partial.isNotEmpty()) emit("partial", partial)
+        if (!isFinal && partial.isNotEmpty()) emit("partial", partial)
         if (!isFinal) return
 
         val sentences = splitter.feed(text).toMutableList()
@@ -201,9 +203,9 @@ class RecorderService : Service() {
         } else if (hitW.isNotEmpty()) {
             Log.i(TAG, "关键词命中(提醒): ${hitW.joinToString("、")}")
             emit("warning_alert", "命中提醒词：${hitW.joinToString("、")}\n原文：$s")
-        } else {
-            emit("sentence", s)
         }
+        // 命中关键词的句子也必须进字幕（警报只是附加提醒，字幕本身必须完整）
+        emit("sentence", s)
     }
 
     /** 桌面版对齐的近重复过滤：完全相等 / 包含且长度比≥0.8 / 相似度≥0.88 */
@@ -245,10 +247,15 @@ class RecorderService : Service() {
         try {
             val f = transcriptFile ?: return
             val all = f.readText()
-            val oldFull = Regex("\\[[0-9:]+\\] ${Regex.escape(oldLine)}[\\r\\n]*").find(all)?.value
-            val stamp = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
-            if (oldFull != null) f.writeText(all.replace(oldFull, "[$stamp] $newLine\n"))
-            else f.appendText("[$stamp] $newLine\n")
+            // 定位【最后一次】出现的带时间戳原句；替换时保留原时间戳（旧逻辑写的是当前时间，会乱序）
+            val m = Regex("(\\[[0-9:]+\\]) ${Regex.escape(oldLine)}[\\r\\n]*").findAll(all).lastOrNull()
+            if (m != null) {
+                f.writeText(all.replaceRange(m.range.first, m.range.last + 1, "${m.groupValues[1]} $newLine\n"))
+            } else {
+                // 旧版无时间戳前缀的历史行匹配不到 → 按新句追加（时间为当前时间）
+                val stamp = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+                f.appendText("[$stamp] $newLine\n")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "修正转录行失败", e)
         }
@@ -278,7 +285,11 @@ class RecorderService : Service() {
     }
 
     private fun flushTranscript() {
-        for (s in splitter.flushRemaining()) commitSentence(s)
+        // 激进模式：把分句器里未冲刷的残留句落盘；
+        // 保守模式：流式本就未 commit（全文由精修通道写盘），此处冲刷会造成同句双份，只写结束标记。
+        if (splitMode == SentenceSplitter.MODE_SPLIT_FAST) {
+            for (s in splitter.flushRemaining()) commitSentence(s)
+        }
         try {
             transcriptFile?.appendText(
                 "\n=== 课堂记录 结束于 ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())} ===\n"
@@ -328,6 +339,7 @@ class RecorderService : Service() {
     }
 
     override fun onDestroy() {
+        destroyed = true
         running.set(false)
         try { mockEngine?.stop() } catch (_: Exception) {}
         try { systemEngine?.stop() } catch (_: Exception) {}
@@ -377,7 +389,7 @@ class RecorderService : Service() {
         } else {
             b.addAction(android.R.drawable.ic_media_pause, "暂停", pausePi)
         }
-        b.addAction(android.R.drawable.ic_media_pause, "停止", stopPi)
+        b.addAction(android.R.drawable.ic_lock_power_off, "停止", stopPi)
         return b.build()
     }
 
@@ -436,6 +448,8 @@ class RecorderService : Service() {
         recentNorm.clear()
         synchronized(recentLines) { recentLines.clear() }
         prepareWavFile()
+        // 清掉上一场可能残留在 VAD 里的尾音，避免污染新一场的精修分段
+        try { refineEngine?.flushPending() } catch (_: Exception) {}
 
         // 识别引擎：设置三选一（模拟 / 系统厂商接口 / 端侧离线），都不阻断录音链路
         when (Prefs.asrMode(this)) {
@@ -449,6 +463,11 @@ class RecorderService : Service() {
             Thread {
                 val (eng, err) = RefineEngine.create(this)
                 mainHandler.post {
+                    if (destroyed) {
+                        // 服务已销毁：释放建好的引擎，避免 native 资源泄漏
+                        try { eng?.release() } catch (_: Exception) {}
+                        return@post
+                    }
                     refineEngine = eng
                     emit(
                         "asr_status",
@@ -472,9 +491,18 @@ class RecorderService : Service() {
             mockEngine?.stop(); mockEngine = null
             systemEngine?.stop(); systemEngine = null
             asrEngine?.finish()
-            flushTranscript()
+            // 引擎 finish 后内部 running=false 不可逆：必须释放并置 null，
+            // 否则同一次 App 会话内再次开始会复用到"死引擎"（feedPcm 空跑，无字幕无报错）
+            try { asrEngine?.release() } catch (_: Exception) {}
+            asrEngine = null
+            // 等在跑的精修结束（有界等待），避免最后几句被 onDestroy 的 shutdownNow 打断而丢失
+            try { refineExecutor.submit { }.get(2500, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: Exception) {}
+            // 收尾落盘放主线程：保证 finish 冲刷出的最后一句话（同样 post 到主线程）先落盘，再写结束标记
+            mainHandler.post {
+                flushTranscript()
+                running.set(false)
+            }
             finalizeWav()
-            running.set(false)
             stopRequested.set(false)
             Log.i(TAG, "录音结束")
         }, "classfox-recorder").apply { start() }
@@ -525,11 +553,13 @@ class RecorderService : Service() {
                     try { engine.release() } catch (_: Exception) {}
                     return@post
                 }
-                asrEngine = engine
                 if (err != null) {
+                    // 初始化失败不登记为可用引擎（否则本场 feedPcm 静默空跑、下一场还复用坏引擎）
+                    try { engine.release() } catch (_: Exception) {}
                     Log.e(TAG, "ASR 不可用: $err")
                     emit("asr_status", "离线ASR初始化失败: $err")
                 } else {
+                    asrEngine = engine
                     val secs = (System.currentTimeMillis() - t0) / 1000
                     emit("asr_status", "离线ASR已就绪（初始化耗时 ${secs} 秒）")
                 }
@@ -575,11 +605,21 @@ class RecorderService : Service() {
                 isNearSimilar(prev, s)
             )
         if (!replaceable) {
-            // 流式漏掉的语句：作为新句补录（orig 空 → UI 追加而非替换）
+            // 流式漏掉的语句：作为新句补录（orig 空 → UI 追加而非替换）。
+            // 保守模式下流式不落盘，这里是唯一写盘机会：必须兜底打开文件、推进 lastCommitted
+            // 并做近重复过滤——否则保守模式整段静默不落盘（§2.1），同一句还可能写两次。
+            if (isNearDuplicate(s)) {
+                Log.i(TAG, "精修补录命中近重复，跳过落盘: $s")
+                emit("sentence_corrected", s)
+                return
+            }
             val stamp = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(startStamp))
             try {
-                transcriptFile?.appendText("[$stamp] $s\n")
+                val f = transcriptFile ?: openTranscriptFile()
+                f?.appendText("[$stamp] $s\n")
             } catch (_: Exception) {}
+            lastCommitted = s
+            lastCommittedWasClosed = true
             Log.i(TAG, "精修补录: $s")
             emit("sentence_corrected", s)
             return
@@ -726,7 +766,8 @@ class RecorderService : Service() {
         mainHandler.postDelayed({
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
-        }, 800)
+        // 延迟需大于录音线程里"等精修排空"的上限(2500ms)，否则 onDestroy 的 shutdownNow 仍会打断收尾
+        }, 2800)
     }
 
     private fun intLE(v: Int): ByteArray = byteArrayOf(

@@ -50,24 +50,27 @@ class OfflineAsrEngine(
     /** 从 assets 拷贝模型到 filesDir(仅首次),返回目录 */
     private fun ensureModel(): File? {
         val dir = File(context.filesDir, spec.dirName)
-        val enc = File(dir, spec.encoder)
-        if (enc.exists() && enc.length() > 0) return dir
         dir.mkdirs()
-        val assets = context.assets.list(spec.assetDir) ?: return null
-        for (name in assets) {
+        // 逐个校验关键文件：旧逻辑只查 encoder 存在就跳过，"半个模型目录"（上次中断残留）会混过检查 → native 崩溃。
+        // 缺哪个补哪个，单个失败不中断其余拷贝，最后总验收。
+        val need = listOf(spec.encoder, spec.decoder, spec.joiner, "tokens.txt")
+        val assets = context.assets.list(spec.assetDir)?.toSet() ?: return null
+        var ok = true
+        for (name in need) {
+            val f = File(dir, name)
+            if (f.exists() && f.length() > 0) continue
+            if (name !in assets) { Log.e(TAG, "assets 中不存在模型文件: ${spec.assetDir}/$name"); ok = false; continue }
             try {
                 context.assets.open("${spec.assetDir}/$name").use { input ->
-                    File(dir, name).outputStream().use { output ->
-                        input.copyTo(output)
-                    }
+                    f.outputStream().use { output -> input.copyTo(output) }
                 }
                 Log.i(TAG, "模型文件就绪: $name")
             } catch (e: Exception) {
                 Log.e(TAG, "拷贝模型失败: $name", e)
-                return null
+                ok = false
             }
         }
-        return dir
+        return if (ok) dir else null
     }
 
     /** 初始化识别器;失败返回错误文案 */

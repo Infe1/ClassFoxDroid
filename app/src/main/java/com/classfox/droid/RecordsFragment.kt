@@ -85,6 +85,12 @@ class RecordsFragment : Fragment() {
         super.onPause()
     }
 
+    override fun onHiddenChanged(hidden: Boolean) {
+        super.onHiddenChanged(hidden)
+        // show/hide 保活模式下切回不触发 onResume：切回刷新列表，切走停掉播放
+        if (hidden) stopPlayer() else if (_b != null) reload()
+    }
+
     override fun onDestroyView() {
         _b = null
         super.onDestroyView()
@@ -189,9 +195,13 @@ class RecordsFragment : Fragment() {
             .setView(progress)
             .setNegativeButton("取消", null)
             .show()
+        // 取消标记：用户关掉对话框后，后台线程不再写文件/刷 UI
+        val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+        dlg.setOnDismissListener { cancelled.set(true) }
         Thread {
             try {
-                val transcript = f.readText()
+                // 转录可能很长：超长截断，避免整读长文撑爆 LLM 上下文被拒
+                val transcript = f.readText().let { if (it.length > 15000) it.take(15000) + "\n…（转录过长，已截断）" else it }
                 val material = try {
                     File(ctx.getExternalFilesDir(null), "classfox/current_class_material.txt")
                         .readText().trim()
@@ -201,6 +211,7 @@ class RecordsFragment : Fragment() {
                     "【课程资料（PPT内容）】\n${material.ifBlank { "暂无课程资料" }}\n\n【完整课堂转录】\n$transcript\n\n请生成课堂笔记。",
                     maxTokens = 8000, temperature = 0.5, timeoutMs = 180_000
                 )
+                if (cancelled.get()) return@Thread
                 if (note.isBlank()) throw IllegalStateException("模型返回了空内容（思考型模型可能截断，换个模型或缩短转录）")
                 val out = File(f.parentFile, "summary_" + f.name.removeSuffix(".txt") + ".md")
                 out.writeText(note)

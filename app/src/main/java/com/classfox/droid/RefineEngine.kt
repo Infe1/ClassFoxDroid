@@ -79,11 +79,13 @@ class RefineEngine private constructor(
 
         private fun ensureModels(context: Context): File {
             val dir = File(context.filesDir, SV_DIR)
-            if (File(dir, "model.int8.onnx").exists() && File(dir, "model.int8.onnx").length() > 0) return dir
             dir.mkdirs()
+            // 两个文件逐个校验、缺谁补谁：只查 model 会让 tokens.txt 缺失的"半个目录"混过去 → native 崩溃
             for (name in listOf("model.int8.onnx", "tokens.txt")) {
+                val f = File(dir, name)
+                if (f.exists() && f.length() > 0) continue
                 context.assets.open("sensevoice/$name").use { input ->
-                    File(dir, name).outputStream().use { input.copyTo(it) }
+                    f.outputStream().use { input.copyTo(it) }
                 }
                 Log.i(TAG, "解压: $name")
             }

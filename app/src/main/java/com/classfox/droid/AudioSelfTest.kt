@@ -35,7 +35,7 @@ object AudioSelfTest {
                 Log.i(TAG, "自检开始: ${pcm.size} samples")
 
                 // 与监听服务同一条链路：endpoint final → 分句器 → 定稿句
-                val splitter = SentenceSplitter()
+                val splitter = SentenceSplitter(Prefs.splitMode(context))  // 跟随用户设置，结果才有可比性
                 val sb = StringBuilder()
                 engine = OfflineAsrEngine(context.applicationContext) { text, isFinal ->
                     if (isFinal) synchronized(sb) {
@@ -100,6 +100,7 @@ object AudioSelfTest {
         while (pos + 8 <= bytes.size) {
             val id = String(bytes, pos, 4)
             val sz = bb.getInt(pos + 4)
+            if (sz < 0) break  // 畸形 chunk：负长度会让 pos 倒退死循环
             when (id) {
                 "fmt " -> {
                     channels = bb.getShort(pos + 8).toInt()

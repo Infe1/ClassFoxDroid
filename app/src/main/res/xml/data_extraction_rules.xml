@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 数据提取规则（Android 12+）：云备份与设备间迁移都排除存 LLM Key 的 SharedPreferences -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="classfox_prefs.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="classfox_prefs.xml" />
+    </device-transfer>
+</data-extraction-rules>

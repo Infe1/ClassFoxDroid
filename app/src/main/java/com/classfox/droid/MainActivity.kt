@@ -50,6 +50,17 @@ class MainActivity : AppCompatActivity() {
             val kind = intent?.getStringExtra(RecorderService.EXTRA_EVENT) ?: return
             val text = intent.getStringExtra(RecorderService.EXTRA_TEXT) ?: ""
             val orig = intent.getStringExtra(RecorderService.EXTRA_TEXT_ORIG)
+            // 字幕缓冲挂在 Activity 级（而非 Fragment 的 sink 注册期）：
+            // 退后台/切页时 ListenFragment.onPause 会注销 sink，但此 receiver 仍在，
+            // 保证后台期间 CaptionBuffer 持续累积，回前台渲染不漏句。
+            when (kind) {
+                "partial" -> CaptionBuffer.partial = text
+                "sentence" -> { CaptionBuffer.partial = ""; CaptionBuffer.appendSentence(text) }
+                "sentence_corrected" -> {
+                    if (orig.isNullOrEmpty()) CaptionBuffer.appendSentence(text)
+                    else CaptionBuffer.replaceLine(orig, text)
+                }
+            }
             listenSink?.invoke(kind, text, orig)
         }
     }

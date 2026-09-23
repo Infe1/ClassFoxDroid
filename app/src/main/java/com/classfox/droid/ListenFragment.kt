@@ -88,6 +88,15 @@ class ListenFragment : Fragment() {
         super.onPause()
     }
 
+    override fun onHiddenChanged(hidden: Boolean) {
+        super.onHiddenChanged(hidden)
+        // show/hide 保活模式下切回本页不走 onResume：在此刷新课程历史与字幕
+        if (!hidden && _b != null) {
+            refreshCourseHistory()
+            renderCaption()
+        }
+    }
+
     override fun onDestroyView() {
         _b = null
         super.onDestroyView()
@@ -112,33 +121,28 @@ class ListenFragment : Fragment() {
                 showAlert(text, danger = false)
                 LogStore.append(requireContext(), "[提醒] $text")
             }
+            // CaptionBuffer 的写入已上移到 MainActivity.eventReceiver（后台也不断流），这里只渲染与记日志
             "sentence" -> {
-                CaptionBuffer.partial = ""
-                CaptionBuffer.appendSentence(text)
                 renderCaption()
                 LogStore.append(requireContext(), "[句] $text")
             }
             "sentence_corrected" -> {
-                // 精修结果按服务端给的原句匹配替换；orig 空 = 流式漏句的补录 → 追加。
-                // 找不到原句（已被裁剪）→ 跳过，绝不追加，杜绝原句/精修句同屏双显。
-                if (orig.isNullOrEmpty()) {
-                    CaptionBuffer.appendSentence(text)
-                } else {
-                    CaptionBuffer.replaceLine(orig, text)
-                }
                 renderCaption()
                 LogStore.append(requireContext(), "[精修] $text")
             }
-            "voice", "error" -> LogStore.append(requireContext(), text)
+            "voice" -> LogStore.append(requireContext(), text)
+            "error" -> {
+                // 启动失败（权限/音频设备/前台服务异常）：服务此时未进运行态也不发 stopped，必须在此复位 UI
+                isRunning = false; isPaused = false
+                render()
+                LogStore.append(requireContext(), text)
+            }
             "asr_status" -> {
                 LogStore.append(requireContext(), text)
                 // 引擎故障显性化：不再只留在一闪而过的日志里
                 if (text.contains("失败") || text.contains("不可用")) showAlert(text, danger = true)
             }
-            "partial" -> {
-                CaptionBuffer.partial = if (text.isEmpty()) "" else "$text"
-                renderCaption()
-            }
+            "partial" -> renderCaption()
         }
     }
 

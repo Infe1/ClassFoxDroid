@@ -14,7 +14,9 @@ object CaptionBuffer {
     /** 超长裁掉最老一行，UI 与落盘格式一致（每行以 \n 结尾） */
     fun trim() {
         if (history.length > MAX_CHARS) {
-            history.delete(0, history.indexOf('\n').coerceAtLeast(0) + 1)
+            // 无换行（整屏一条超长行）时按半容量截断；旧写法 delete(0,1) 只删 1 个字符，每句都白跑一次 O(n)
+            val idx = history.indexOf('\n')
+            history.delete(0, if (idx >= 0) idx + 1 else MAX_CHARS / 2)
         }
     }
 

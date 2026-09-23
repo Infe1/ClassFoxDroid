@@ -8,7 +8,18 @@
 
 ## 0. 一句话状态
 
-**v0.10.3（2026-09-22）：字幕双显/消失根因修复（保守模式纯精修链路）+ AI 课堂笔记 + 精度实验定参。提交 e43c730，已推 GitHub+backup。**
+**v0.10.4（2026-09-23）：两轮静态审查 28 项整改——保守模式精修补录不落盘（§2.1）、二次监听复用死引擎（#12）两个高危修复 + 后台字幕断层/启动失败卡死/切回不刷新等 21 项。详见 `docs/修复_v0.10.4_2026-09-23.md`。compileDebugKotlin 已验证。**
+
+### v0.10.4（2026-09-23，全量静态审查后整改）
+
+- **两个高危**：
+  1. 保守模式精修补录静默不落盘（`applyRefined` 写 `transcriptFile?.` 恒 null 被吞）→ 兜底 `openTranscriptFile()` + 推进 `lastCommitted` + 近重复过滤；`flushTranscript` 按模式区分（保守只写结束标记）。
+  2. 二次监听复用"死"离线引擎（服务绑定存活不销毁，`finish()` 后引擎不可逆，`startOfflineEngine` 复用分支直接返回）→ 录音线程收尾 `release() + asrEngine = null`；配套 `refineEngine?.flushPending()` 清 VAD 尾音。
+- **中危**：CaptionBuffer 写入上移到 `MainActivity.eventReceiver`（退后台 sink 注销也不断流，Fragment sink 只渲染）；启动失败 `error` 事件复位 UI；两个 Fragment 补 `onHiddenChanged`（切回刷新/切走停播）；停止时序修复（收尾落盘移主线程 FIFO + 精修排空有界等待 2500ms + stopSelf 2800ms）；LLM Key 从云备份/设备迁移排除（两个 res/xml 规则文件）；DiagAsrReceiver 输出路径收敛到应用私有目录。
+- **低/微**：模型文件逐个校验重拷、精修回写保留原时间戳、关键词句也上字幕、坏引擎不登记、final 帧不闪 partial、AI 总结 15k 截断+可取消、监听中禁诊断/自检、LogStore 锁统一、Mock 停止即中断等，共 23 项。
+- **关键行为变化（接手注意）**：`sentence` 事件关键词命中时也发；final 帧不再发 partial；字幕缓冲只有 `MainActivity.eventReceiver` 一个写入方；保守模式落盘唯一入口是精修补录。
+- 全部明细、验证步骤、回退方式：`docs/修复_v0.10.4_2026-09-23.md`；审查依据：`docs/审查_字幕识别与落盘链路_2026-09-23.md`。
+
 
 ### v0.10.3（2026-09-22，用户真机数据回归 + 精度实验）
 - **实验工具**：`DiagAsrReceiver`（manifest exported，广播 `com.classfox.droid.DIAG_ASR`，须加 `-f 0x1000000` 且 app 已启动；MuMu 后台广播被拦）。参数：`--es wav --es out --ef silence(默认2.0) --ei mode(1保守) --ei stream --ei refine --ef vadsil(0.75) --ef vadthr(0.5)`。流式读盘防 OOM（60MB WAV 整载会 OOM）；输出带音频相对时间戳（注意 `Date()` 本地时区，分析时 +8h 校正）。

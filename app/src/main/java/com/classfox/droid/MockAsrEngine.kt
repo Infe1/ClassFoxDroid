@@ -66,7 +66,7 @@ class MockAsrEngine(private val onText: (text: String, isFinal: Boolean) -> Unit
 
     fun setPaused(p: Boolean) { paused = p }
 
-    fun stop() { running = false }
+    fun stop() { running = false; thread?.interrupt() }  // interrupt 让 sleep 立即退（sleepInterruptible 会顺带清 running）
 
     private fun sleepInterruptible(ms: Long) {
         try { Thread.sleep(ms) } catch (_: InterruptedException) { running = false }

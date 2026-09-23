@@ -28,6 +28,11 @@ class SettingsFragment : Fragment() {
 
     /** 离线识别引擎初始化诊断：真机上"没有字幕"时用它定位 */
     private fun runEngineDiag() {
+        if ((activity as? MainActivity)?.service?.isActive() == true) {
+            // 监听中解包同一模型目录会与服务的引擎初始化交错（部分写文件损坏），且双份模型驻留易 OOM
+            toast("监听中，请先停止再诊断")
+            return
+        }
         val tv = b.tvSelfTest
         tv.visibility = View.VISIBLE
         tv.text = "诊断中：解压并初始化离线识别模型（首次约几秒到十几秒）…"
@@ -207,6 +212,10 @@ class SettingsFragment : Fragment() {
 
         b.btnDiag.setOnClickListener { runEngineDiag() }
         b.btnSelfTest.setOnClickListener {
+            if ((activity as? MainActivity)?.service?.isActive() == true) {
+                toast("监听中，请先停止再自检")
+                return@setOnClickListener
+            }
             selfTestLauncher.launch(arrayOf("audio/wav", "audio/x-wav", "audio/*"))
         }
 
@@ -232,7 +241,7 @@ class SettingsFragment : Fragment() {
     private fun hint() {
         b.tvEngineHint.text = when (Prefs.asrMode(requireContext())) {
             Prefs.ASR_SYSTEM ->
-                "当前：系统识别（厂商接口）—— 调用设备自带的语音识别服务（通常为讯飞/厂商自研引擎），不占安装包体积；需设备提供该服务，若无将自动回退到离线识别。下次开始监听时生效。"
+                "当前：系统识别（厂商接口）—— 调用设备自带的语音识别服务（通常为讯飞/厂商自研引擎），不占安装包体积；需设备提供该服务，若设备无语音服务则不出字幕（不会自动回退），请改用离线识别。下次开始监听时生效。"
             Prefs.ASR_OFFLINE ->
                 "当前：端侧离线识别（sherpa-onnx 流式中文）—— 完全离线、行为一致，模型已内置；识别精度取决于内置模型大小。下次开始监听时生效。"
             else ->
