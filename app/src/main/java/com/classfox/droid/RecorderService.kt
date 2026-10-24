@@ -98,6 +98,13 @@ class RecorderService : Service() {
     private var refineEngine: RefineEngine? = null
     private val refineExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val refineBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+    /**
+     * 精修段队列：真机上 SenseVoice 偶发慢于语音产生速度，"忙则丢段"会让被丢的语音段
+     * 在保守模式下永不落盘（流式不写盘，精修是唯一写盘口）——改为有界排队串行消化，
+     * 超限丢最旧并记日志。停止时的既有有界等待（submit{}.get(2500ms)）排在排空任务之后，
+     * 自然覆盖队列余量。
+     */
+    private val refineQueue = ArrayDeque<FloatArray>()
     /** onDestroy 后置位：精修引擎异步初始化回主线程时若服务已销毁，直接释放，避免 native 泄漏 */
     @Volatile private var destroyed = false
 
@@ -113,6 +120,14 @@ class RecorderService : Service() {
     private val recentNorm = ArrayDeque<String>() // 近重复窗口
     private class RecentLine(val at: Long, val line: String)
     private val recentLines = ArrayDeque<RecentLine>() // 最近转录行（内存，供 AI 救场/进度用）
+
+    /** 追加一条最近转录行（AI 快答数据源；流式提交与精修补录统一走这里） */
+    private fun pushRecent(line: String) {
+        synchronized(recentLines) {
+            recentLines.addLast(RecentLine(System.currentTimeMillis(), line))
+            while (recentLines.size > 600) recentLines.removeFirst()
+        }
+    }
     private var dangerKeywords: List<String> = emptyList()
     private var warningKeywords: List<String> = emptyList()
 
@@ -186,14 +201,10 @@ class RecorderService : Service() {
         } catch (e: Exception) {
             Log.e(TAG, "写转录失败", e)
         }
-        synchronized(recentLines) {
-            recentLines.addLast(RecentLine(System.currentTimeMillis(), "[$stamp] $s"))
-            while (recentLines.size > 600) recentLines.removeFirst()
-        }
+        pushRecent("[$stamp] $s")
         lastCommitted = s
         lastCommittedWasClosed = isClosedSentence(s)
         Log.i(TAG, "句: $s")
-
         // 关键词检测：只查本行，danger 优先于 warning
         val hitD = dangerKeywords.filter { s.contains(it) }
         val hitW = warningKeywords.filter { s.contains(it) }
@@ -570,25 +581,50 @@ class RecorderService : Service() {
     /**
      * 提交一段 VAD 切出的完整语音做高精度重转写。
      * 结果替换"最近一条未闭合的流式句子"：落盘回写 + 广播 sentence_corrected。
-     * 单线程串行 + busy 位丢弃积压，保证不拖慢主链路。
+     * 段先进有界队列，单线程串行消化（忙时不丢段，队列满丢最旧），不拖慢主链路。
      */
     private fun submitRefine(samples: FloatArray) {
-        val eng = refineEngine ?: return
-        if (!refineBusy.compareAndSet(false, true)) {
-            Log.i(TAG, "精修忙，丢弃一段（${samples.size / SAMPLE_RATE}s）")
-            return
+        if (refineEngine == null) return
+        synchronized(refineQueue) {
+            if (refineQueue.size >= 16) {
+                refineQueue.removeFirst()
+                Log.i(TAG, "精修队列已满，丢弃最旧一段（${samples.size / SAMPLE_RATE}s）")
+            }
+            refineQueue.addLast(samples)
         }
-        val startStamp = System.currentTimeMillis() - samples.size * 1000L / SAMPLE_RATE
+        drainRefine()
+    }
+
+    /** 串行排空精修队列；已有排空任务在跑时直接返回（该任务会循环取到队列空） */
+    private fun drainRefine() {
+        if (!refineBusy.compareAndSet(false, true)) return
         refineExecutor.execute {
             try {
-                val text = eng.transcribe(samples)
-                if (text.isNotEmpty()) {
-                    mainHandler.post { applyRefined(text, startStamp) }
+                while (true) {
+                    val seg = synchronized(refineQueue) { refineQueue.pollFirst() }
+                    if (seg == null) {
+                        // 持锁确认队列仍为空后才退出，避免与 submitRefine 竞争漏掉新段
+                        synchronized(refineQueue) {
+                            if (refineQueue.isEmpty()) {
+                                refineBusy.set(false)
+                                return@execute
+                            }
+                        }
+                        continue
+                    }
+                    try {
+                        val eng = refineEngine ?: break
+                        val text = eng.transcribe(seg)
+                        if (text.isNotEmpty()) {
+                            val startStamp = System.currentTimeMillis() - seg.size * 1000L / SAMPLE_RATE
+                            mainHandler.post { applyRefined(text, startStamp) }
+                        }
+                    } catch (e: Throwable) {
+                        Log.e(TAG, "精修失败", e)
+                    }
                 }
-            } catch (e: Throwable) {
-                Log.e(TAG, "精修失败", e)
             } finally {
-                refineBusy.set(false)
+                refineBusy.set(false) // 异常兜底；正常路径已在锁内置 false
             }
         }
     }
@@ -618,17 +654,33 @@ class RecorderService : Service() {
                 val f = transcriptFile ?: openTranscriptFile()
                 f?.appendText("[$stamp] $s\n")
             } catch (_: Exception) {}
+            // 保守模式流式不 commit，recentLines 只能在这里喂——否则 AI 救场/进度
+            // 永远读到"最近 N 分钟还没有转录内容"（v0.10.5 根因）
+            pushRecent("[$stamp] $s")
             lastCommitted = s
             lastCommittedWasClosed = true
             Log.i(TAG, "精修补录: $s")
             emit("sentence_corrected", s)
             return
         }
-        replaceLastTranscriptLine(prev!!, s)
+        // 走到这里 replaceable==true，prev 必非空（?: 仅为空安全收窄，不会触发）
+        val old = prev ?: return
+        replaceLastTranscriptLine(old, s)
+        // 替换分支同步修 recentLines 里的旧流式文本，AI 快答读到的是精修后的内容
+        // （java.util.ArrayDeque 无索引访问，快照-改-回写）
+        synchronized(recentLines) {
+            val snapshot = recentLines.toMutableList()
+            val idx = snapshot.indexOfLast { it.line.endsWith(old) }
+            if (idx >= 0) {
+                snapshot[idx] = RecentLine(snapshot[idx].at, snapshot[idx].line.dropLast(old.length) + s)
+                recentLines.clear()
+                recentLines.addAll(snapshot)
+            }
+        }
         lastCommitted = s
         lastCommittedWasClosed = true
-        Log.i(TAG, "精修替换: $prev → $s")
-        emit("sentence_corrected", s, prev)
+        Log.i(TAG, "精修替换: $old → $s")
+        emit("sentence_corrected", s, old)
     }
 
     private fun isNearSimilar(a: String, b: String): Boolean {
