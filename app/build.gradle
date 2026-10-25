@@ -11,8 +11,8 @@ android {
         applicationId "com.classfox.mobile.clean"
         minSdk 26
         targetSdk 34
-        versionCode 23
-        versionName "0.10.7"
+        versionCode 24
+        versionName "0.11.0"
     }
 
     buildTypes {
@@ -41,4 +41,6 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
     // 端侧离线 ASR:纯 Java API 类;安卓 .so 走本地 jniLibs(不入桌面 native)
     implementation('com.github.k2-fsa.sherpa-onnx:sherpa-onnx-jvm:v1.13.7')
+    // TranscriptBufferManager 行为锁单测（纯 JVM）
+    testImplementation 'junit:junit:4.13.2'
 }

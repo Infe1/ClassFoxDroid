@@ -8,7 +8,14 @@
 
 ## 0. 一句话状态
 
-**v0.10.7（2026-10-26）：DiagAsrReceiver 新增 `toservice` 注入模式（WAV PCM → 运行中服务的真实 processChunk 链路），用于在无麦克风的模拟器上端到端验证服务逻辑。实测两连：①保守模式注入 90s 真实课堂音频 → 精修补录 13 句 → AI 救场"老师原话"为精修句（v0.10.5-F1 服务路径闭环）；②注入中途停止 → 首跑踩出注入线程与停止拆解的竞态（asrEngine release vs native feedPcm → SIGSEGV），已修（diagFeedLock 全覆盖 + diagFeedPcm 响应 stopRequested + stopSelf 改条件轮询"队列空且无在跑任务"30s 上限），复跑无崩溃、停止后 1.5s 干净收尾。注意：模拟器上注入（~2x 实时）慢于精修引擎（~5x 实时），深积压场景无法在模拟器复现，队列满丢最旧/积压排空靠条件轮询的结构保证。**
+**v0.11.0（2026-10-26）：Argon S1/S2/S3 重构落地——①新增 `TranscriptBufferManager`（纯 Kotlin 可 JUnit，收敛 recentLines+行id/recentNorm/lastCommitted），11 个单测全过锁定近重复/窗口/半句修正/精修替换行为；②精修替换按行 id 精确改写（后缀匹配降为兜底）；③转录磁盘 I/O 全部移出主线程（`transcriptExecutor` 单写者），末行替换 O(1) RandomAccessFile seek 覆写，停止轮询条件扩展"落盘收尾完成"。行为/接口/文件格式零变化。实例3 注入回归三场景全过（保守 AI 救场/中途停止/激进精修替换 O(1) 快路径实跑）。详见 `docs/重构_v0.11.0_2026-10-26.md`。**
+
+### v0.11.0（2026-10-26，S1+S2+S3 重构）
+
+- **TranscriptBufferManager**（新文件）：`pushRecent→行id`、`recordCommitted/updateLastCommitted`、`replaceRecentText(id,…)`（精确）+`replaceRecentSuffix`（兜底）、`isNearDuplicate`（随迁）、`recentSince`、`clearAll`；全方法 synchronized。
+- **RecorderService**：`tbuf` 替代散落字段；`transcriptExecutor` 单写者 + `pendingTranscriptOps`（停止轮询用）+ `lastLineInfo`（末行字节偏移，UTF-8 字节非字符）；`enqueueAppendLine/enqueueReplaceLast/createTranscriptFileIfNeeded`（懒建，零语句会话不产生文件，对齐旧行为）；全量扫描替换执行后 lastLineInfo 失效重建。
+- **测试**：`app/src/test/.../TranscriptBufferManagerTest.kt` 11 用例——后续改这块先跑 `gradle testDebugUnitTest --tests TranscriptBufferManagerTest`。
+- **接手注意**：tbuf 全方法主线程调用零成本但可跨线程；磁盘只许经 `runOnTranscriptWorker`（勿在主线程直接碰 transcriptFile）；行 id 与文件行一一对应（半句修正/精修替换不换 id）。
 
 ### v0.10.7（2026-10-26，WAV 注入测试钩子）
 

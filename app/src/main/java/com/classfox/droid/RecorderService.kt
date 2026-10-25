@@ -141,34 +141,17 @@ class RecorderService : Service() {
      *  初值在 onCreate 赋（服务字段初始化时 Context 尚未 attach，不能读 Prefs）。 */
     @Volatile private var splitMode = SentenceSplitter.MODE_MERGE_CONSERVATIVE
     private var transcriptFile: File? = null
-    private var lastCommitted: String? = null
-    private var lastCommittedWasClosed = false
-    private val recentNorm = ArrayDeque<String>() // 近重复窗口
-    private class RecentLine(val at: Long, val line: String)
-    private val recentLines = ArrayDeque<RecentLine>() // 最近转录行（内存，供 AI 救场/进度用）
+    private val tbuf = TranscriptBufferManager()
 
-    /** 追加一条最近转录行（AI 快答数据源；流式提交与精修补录统一走这里） */
-    private fun pushRecent(line: String) {
-        synchronized(recentLines) {
-            recentLines.addLast(RecentLine(System.currentTimeMillis(), line))
-            while (recentLines.size > 600) recentLines.removeFirst()
-        }
-    }
+    /** 转录磁盘 I/O 单线程执行器（v0.11.0 Argon-S2）：建文件/追加/末行替换全部串行在此，
+     *  主线程只入队不碰盘——旧行为每次精修都在主线程全量 readText+writeText，长课堂掉帧。
+     *  pendingTranscriptOps 供停止轮询确认落盘收尾完成后再 onDestroy。 */
+    private val transcriptExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    @Volatile private var pendingTranscriptOps = 0
 
-    /** 把 recentLines 中以 old 结尾的最新条目改写为 new（保留时间戳前缀与入队时刻）。
-     *  流式半句修正与精修替换共用；匹配不到则静默跳过（条目已被滑窗挤出等场景）。 */
-    private fun replaceRecentSuffix(old: String, new: String) {
-        synchronized(recentLines) {
-            // java.util.ArrayDeque 无索引访问，快照-改-回写
-            val snapshot = recentLines.toMutableList()
-            val idx = snapshot.indexOfLast { it.line.endsWith(old) }
-            if (idx >= 0) {
-                snapshot[idx] = RecentLine(snapshot[idx].at, snapshot[idx].line.dropLast(old.length) + new)
-                recentLines.clear()
-                recentLines.addAll(snapshot)
-            }
-        }
-    }
+    /** 末行信息（仅 transcriptExecutor 线程读写）：行首字节偏移 to 完整行文本（含时间戳前缀）。
+     *  替换末行 O(1) seek 覆写+截断（Argon-S2）；全量扫描替换后置 null 失效，下次追加重建。 */
+    @Volatile private var lastLineInfo: Pair<Long, String>? = null
     private var dangerKeywords: List<String> = emptyList()
     private var warningKeywords: List<String> = emptyList()
 
@@ -190,9 +173,7 @@ class RecorderService : Service() {
 
     /** 最近 N 分钟的转录行（内存缓存，供 AI 救场/进度） */
     fun recentTranscript(minutes: Int): String = try {
-        val cutoff = System.currentTimeMillis() - minutes * 60_000L
-        synchronized(recentLines) { recentLines.filter { it.at >= cutoff } }
-            .joinToString("\n") { it.line }
+        tbuf.recentSince(System.currentTimeMillis() - minutes * 60_000L)
     } catch (_: Exception) { "" }
 
     /**
@@ -218,35 +199,28 @@ class RecorderService : Service() {
         if (s.isEmpty() || !SentenceSplitter.isMeaningful(s)) return
 
         // 激进模式的半句修正：新句是上一句的延伸 → 回写替换，避免流式重复
-        val prev = lastCommitted
-        if (!lastCommittedWasClosed && prev != null && s != prev &&
+        val prev = tbuf.lastCommitted
+        if (!tbuf.lastCommittedWasClosed && prev != null && s != prev &&
             (s.startsWith(prev) || (prev.startsWith(s) && s.length < prev.length))
         ) {
-            replaceLastTranscriptLine(prev, s)
-            // recentLines 同步改写，否则 AI 快答读到的是修正前的旧半句（v0.10.6）
-            replaceRecentSuffix(prev, s)
-            lastCommitted = s
-            lastCommittedWasClosed = isClosedSentence(s)
+            enqueueReplaceLast(prev, s)
+            // recentLines 同步改写（同一行 id），否则 AI 快答读到修正前的旧半句（v0.10.6）
+            tbuf.replaceRecentSuffix(prev, s)
+            tbuf.updateLastCommitted(s, isClosedSentence(s))
             emit("sentence_corrected", s, prev)
             return
         }
 
-        if (isNearDuplicate(s)) {
+        if (tbuf.isNearDuplicate(s)) {
             Log.i(TAG, "近重复丢弃: $s")
             return
         }
 
-        // 落盘（对齐桌面版 [HH:MM:SS] 文本）
+        // 落盘（对齐桌面版 [HH:MM:SS] 文本）；行 id 记入 tbuf 供精修替换精确定位
         val stamp = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
-        try {
-            val f = transcriptFile ?: openTranscriptFile()
-            f?.appendText("[$stamp] $s\n")
-        } catch (e: Exception) {
-            Log.e(TAG, "写转录失败", e)
-        }
-        pushRecent("[$stamp] $s")
-        lastCommitted = s
-        lastCommittedWasClosed = isClosedSentence(s)
+        enqueueAppendLine("[$stamp] $s")
+        val lineId = tbuf.pushRecent("[$stamp] $s")
+        tbuf.recordCommitted(s, isClosedSentence(s), lineId)
         Log.i(TAG, "句: $s")
         // 关键词检测：只查本行，danger 优先于 warning
         val hitD = dangerKeywords.filter { s.contains(it) }
@@ -262,56 +236,87 @@ class RecorderService : Service() {
         emit("sentence", s)
     }
 
-    /** 桌面版对齐的近重复过滤：完全相等 / 包含且长度比≥0.8 / 相似度≥0.88 */
-    private fun isNearDuplicate(s: String): Boolean {
-        val t = s.trim().trimEnd(*"。，！？!?；;、".toCharArray())
-        for (r in recentNorm) {
-            if (r == t) return true
-            val longer = max(r.length, t.length)
-            val shorter = min(r.length, t.length)
-            if (longer >= 4 && shorter > 0 && shorter * 10 >= longer * 8 &&
-                (r.contains(t) || t.contains(r))
-            ) return true
-            if (longer >= 6 && lcsRatio(r, t) >= 0.88) return true
-        }
-        recentNorm.addLast(t)
-        if (recentNorm.size > 12) recentNorm.removeFirst()
-        return false
-    }
-
-    /** SequenceMatcher 风格相似度 = 2*LCS/(lenA+lenB) */
-    private fun lcsRatio(a: String, b: String): Double {
-        if (a.isEmpty() || b.isEmpty()) return 0.0
-        val dp = IntArray(b.length + 1)
-        for (i in 1..a.length) {
-            var prev = 0
-            for (j in 1..b.length) {
-                val tmp = dp[j]
-                dp[j] = if (a[i - 1] == b[j - 1]) prev + 1 else maxOf(dp[j], dp[j - 1])
-                prev = tmp
-            }
-        }
-        return 2.0 * dp[b.length] / (a.length + b.length)
-    }
+    /** 桌面版对齐的近重复过滤已迁入 TranscriptBufferManager（v0.11.0） */
 
     private fun isClosedSentence(s: String): Boolean =
         s.trim().lastOrNull()?.let { it in "。！？!?；;…" } == true
 
-    private fun replaceLastTranscriptLine(oldLine: String, newLine: String) {
+    /** 转录磁盘 I/O 统一入口：计数入队，串行执行（主线程不碰盘） */
+    private fun runOnTranscriptWorker(task: () -> Unit) {
+        pendingTranscriptOps++
+        transcriptExecutor.execute {
+            try { task() } finally { pendingTranscriptOps-- }
+        }
+    }
+
+    /** 懒建转录文件（仅 transcriptExecutor 线程调用；追加/替换任务开头调用，
+     *  同队列天然先于该会话的一切写操作）。零语句的会话仍不产生文件（对齐旧行为）。 */
+    private fun createTranscriptFileIfNeeded() {
+        if (transcriptFile != null) return
         try {
-            val f = transcriptFile ?: return
-            val all = f.readText()
-            // 定位【最后一次】出现的带时间戳原句；替换时保留原时间戳（旧逻辑写的是当前时间，会乱序）
-            val m = Regex("(\\[[0-9:]+\\]) ${Regex.escape(oldLine)}[\\r\\n]*").findAll(all).lastOrNull()
-            if (m != null) {
-                f.writeText(all.replaceRange(m.range.first, m.range.last + 1, "${m.groupValues[1]} $newLine\n"))
-            } else {
-                // 旧版无时间戳前缀的历史行匹配不到 → 按新句追加（时间为当前时间）
-                val stamp = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
-                f.appendText("[$stamp] $newLine\n")
-            }
+            val dir = File(getExternalFilesDir(null) ?: filesDir, "classfox/${courseDir()}")
+            if (!dir.exists()) dir.mkdirs()
+            val day = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.US).format(Date())
+            val f = File(dir, "class_transcript_$day.txt")
+            f.appendText(
+                "=== 课堂记录 开始于 ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())} ===\n\n" +
+                "课程：${courseName.ifBlank { "未命名课程" }}\n\n"
+            )
+            transcriptFile = f
+            lastLineInfo = null
         } catch (e: Exception) {
-            Log.e(TAG, "修正转录行失败", e)
+            Log.e(TAG, "建转录文件失败", e)
+        }
+    }
+
+    /** 追加一行转录（worker 线程）：记录末行字节偏移，供 O(1) 替换 */
+    private fun enqueueAppendLine(line: String) {
+        runOnTranscriptWorker {
+            try {
+                createTranscriptFileIfNeeded()
+                val f = transcriptFile ?: return@runOnTranscriptWorker
+                val off = f.length()
+                f.appendText(line + "\n")
+                lastLineInfo = off to line
+            } catch (e: Exception) {
+                Log.e(TAG, "写转录失败", e)
+            }
+        }
+    }
+
+    /** 替换最近一条带时间戳的原句为 newLine（worker 线程）。
+     *  快路径：目标即末行 → RandomAccessFile seek 覆写+截断，O(1) 不读全文件；
+     *  慢路径：全量扫描找【最后一次】出现（保留原时间戳，旧逻辑写当前时间会乱序）。 */
+    private fun enqueueReplaceLast(oldLine: String, newLine: String) {
+        runOnTranscriptWorker {
+            try {
+                createTranscriptFileIfNeeded()
+                val f = transcriptFile ?: return@runOnTranscriptWorker
+                val ll = lastLineInfo
+                if (ll != null && ll.second.endsWith(oldLine)) {
+                    val replacement = ll.second.dropLast(oldLine.length) + newLine
+                    java.io.RandomAccessFile(f, "rw").use { r ->
+                        r.seek(ll.first)
+                        val bytes = (replacement + "\n").toByteArray(Charsets.UTF_8)
+                        r.write(bytes)
+                        r.setLength(ll.first + bytes.size)
+                    }
+                    lastLineInfo = ll.first to replacement
+                    return@runOnTranscriptWorker
+                }
+                val all = f.readText()
+                val m = Regex("(\\[[0-9:]+\\]) ${Regex.escape(oldLine)}[\\r\\n]*").findAll(all).lastOrNull()
+                if (m != null) {
+                    f.writeText(all.replaceRange(m.range.first, m.range.last + 1, "${m.groupValues[1]} $newLine\n"))
+                    lastLineInfo = null // 字节偏移已不可信，失效重建
+                } else {
+                    // 旧版无时间戳前缀的历史行匹配不到 → 按新句追加（时间为当前时间）
+                    val stamp = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
+                    enqueueAppendLine("[$stamp] $newLine")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "修正转录行失败", e)
+            }
         }
     }
 
@@ -322,33 +327,19 @@ class RecorderService : Service() {
         return safe.ifBlank { "未命名课程" }
     }
 
-    private fun openTranscriptFile(): File? = try {
-        val dir = File(getExternalFilesDir(null) ?: filesDir, "classfox/${courseDir()}")
-        if (!dir.exists()) dir.mkdirs()
-        val day = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.US).format(Date())
-        val f = File(dir, "class_transcript_$day.txt")
-        transcriptFile = f
-        f.appendText(
-            "=== 课堂记录 开始于 ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())} ===\n\n" +
-            "课程：${courseName.ifBlank { "未命名课程" }}\n\n"
-        )
-        f
-    } catch (e: Exception) {
-        Log.e(TAG, "建转录文件失败", e)
-        null
-    }
-
     private fun flushTranscript() {
         // 激进模式：把分句器里未冲刷的残留句落盘；
         // 保守模式：流式本就未 commit（全文由精修通道写盘），此处冲刷会造成同句双份，只写结束标记。
         if (splitMode == SentenceSplitter.MODE_SPLIT_FAST) {
             for (s in splitter.flushRemaining()) commitSentence(s)
         }
-        try {
-            transcriptFile?.appendText(
-                "\n=== 课堂记录 结束于 ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())} ===\n"
-            )
-        } catch (_: Exception) {}
+        runOnTranscriptWorker {
+            try {
+                transcriptFile?.appendText(
+                    "\n=== 课堂记录 结束于 ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())} ===\n"
+                )
+            } catch (_: Exception) {}
+        }
     }
 
     // ---------- 生命周期 ----------
@@ -402,6 +393,7 @@ class RecorderService : Service() {
         try { asrEngine?.release() } catch (_: Exception) {}
         try { refineEngine?.release() } catch (_: Exception) {}
         refineExecutor.shutdownNow()
+        transcriptExecutor.shutdownNow()
         try { audioRecord?.release() } catch (_: Exception) {}
         try { wavOut?.close() } catch (_: Exception) {}
         broadcast("stopped", "录音服务已停止")
@@ -499,10 +491,7 @@ class RecorderService : Service() {
         paused.set(false)
         running.set(true)
         startedAt = System.currentTimeMillis()
-        lastCommitted = null
-        lastCommittedWasClosed = false
-        recentNorm.clear()
-        synchronized(recentLines) { recentLines.clear() }
+        tbuf.clearAll()
         prepareWavFile()
         // 清掉上一场可能残留在 VAD 里的尾音，避免污染新一场的精修分段
         try { refineEngine?.flushPending() } catch (_: Exception) {}
@@ -691,42 +680,40 @@ class RecorderService : Service() {
     private fun applyRefined(refined: String, startStamp: Long) {
         val s = SentenceSplitter.normalize(refined)
         if (s.isEmpty() || !SentenceSplitter.isMeaningful(s)) return
-        val prev = lastCommitted
+        val prev = tbuf.lastCommitted
         // 找最近提交句里与精修结果最相似的一条做替换（前缀/包含/相似度任一命中）
         val replaceable = prev != null && (
-            s.startsWith(prev!!.trimEnd('。', '，', ',', '！', '？', '!', '?')) ||
+            s.startsWith(prev.trimEnd('。', '，', ',', '！', '？', '!', '?')) ||
                 prev.trimEnd('。', '，', ',', '！', '？', '!', '?').startsWith(s) ||
                 isNearSimilar(prev, s)
             )
         if (!replaceable) {
             // 流式漏掉的语句：作为新句补录（orig 空 → UI 追加而非替换）。
-            // 保守模式下流式不落盘，这里是唯一写盘机会：必须兜底打开文件、推进 lastCommitted
+            // 保守模式下流式不落盘，这里是唯一写盘机会：必须兜底建文件、推进 lastCommitted
             // 并做近重复过滤——否则保守模式整段静默不落盘（§2.1），同一句还可能写两次。
-            if (isNearDuplicate(s)) {
+            if (tbuf.isNearDuplicate(s)) {
                 Log.i(TAG, "精修补录命中近重复，跳过落盘: $s")
                 emit("sentence_corrected", s)
                 return
             }
             val stamp = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(startStamp))
-            try {
-                val f = transcriptFile ?: openTranscriptFile()
-                f?.appendText("[$stamp] $s\n")
-            } catch (_: Exception) {}
+            enqueueAppendLine("[$stamp] $s")
             // 保守模式流式不 commit，recentLines 只能在这里喂——否则 AI 救场/进度
             // 永远读到"最近 N 分钟还没有转录内容"（v0.10.5 根因）
-            pushRecent("[$stamp] $s")
-            lastCommitted = s
-            lastCommittedWasClosed = true
+            val lineId = tbuf.pushRecent("[$stamp] $s")
+            tbuf.recordCommitted(s, true, lineId)
             Log.i(TAG, "精修补录: $s")
             emit("sentence_corrected", s)
             return
         }
         // 走到这里 replaceable==true，prev 必非空（?: 仅为空安全收窄，不会触发）
         val old = prev ?: return
-        replaceLastTranscriptLine(old, s)
-        replaceRecentSuffix(old, s)
-        lastCommitted = s
-        lastCommittedWasClosed = true
+        enqueueReplaceLast(old, s)
+        // S1：按最近提交句的行 id 精确改写；id 失配（行被滑窗挤出）退回后缀匹配
+        if (!tbuf.replaceRecentText(tbuf.lastCommittedLineId, old, s)) {
+            tbuf.replaceRecentSuffix(old, s)
+        }
+        tbuf.updateLastCommitted(s, true)
         Log.i(TAG, "精修替换: $old → $s")
         emit("sentence_corrected", s, old)
     }
@@ -863,13 +850,16 @@ class RecorderService : Service() {
         }
         // 让录音线程自然收尾：冲刷最后半句 + 写结束标记 + finalize WAV
         stopRequested.set(true)
-        // 排空等待：每秒轮询"精修队列空且无在跑任务"，满足（或 30s 硬上限）才 stopSelf。
+        // 排空等待：每秒轮询"精修队列空且无在跑任务且转录落盘收尾完成"，
+        // 满足（或 30s 硬上限）才 stopSelf。
         // 旧固定延迟（2800ms→v0.10.6 动态上限 15.3s）在积压/注入场景会提前 onDestroy，
-        // shutdownNow 打断 native transcribe；改为条件轮询后收尾必然在排空之后（v0.10.7）
+        // shutdownNow 打断 native transcribe / 丢转录尾部写任务；条件轮询后必然在排空之后（v0.10.7/0.11.0）
         val stopPoll = object : Runnable {
             var waited = 0L
             override fun run() {
-                val busy = refineBusy.get() || synchronized(refineQueue) { refineQueue.isNotEmpty() }
+                val busy = refineBusy.get() ||
+                    synchronized(refineQueue) { refineQueue.isNotEmpty() } ||
+                    pendingTranscriptOps > 0
                 if (busy && waited < 30_000L) {
                     waited += 1000L
                     mainHandler.postDelayed(this, 1000L)
