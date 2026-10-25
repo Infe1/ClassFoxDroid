@@ -8,7 +8,14 @@
 
 ## 0. 一句话状态
 
-**v0.10.5（2026-10-07）：用户真机反馈两高危修复——保守模式 `recentLines` 永不填充（AI 救场/讲到哪了恒报"没有转录内容"）+ 精修"忙则丢段"在保守模式下永不落盘（改有界队列串行消化）。详见 `docs/修复_v0.10.5_2026-10-07.md`。compileDebugKotlin 已验证；实声全链路待真机回归（模拟器无麦克风输入）。**
+**v0.10.6（2026-10-26）：Argon 评审处置——F1 残留修复（激进模式半句修正分支漏喂 `recentLines`，AI 快答读到旧半句）+ F2 残留修复（停止时精修排空等待按队列余量动态放宽 2.5~15s，`stopSelf` 延迟对齐，队列积压不再截断尾段）；`recentNorm` 竞态与 LLM 超时两项指控经核对不成立（ingest 全部在主线程/超时早已配置），死锁指控不成立（`.get` 在录音线程）。逐条核对与暂缓重构清单见 `docs/评审_Argon意见处置_2026-10-26.md`。compileDebugKotlin 已验证，未做运行测试（等用户真机回归）。**
+
+### v0.10.6（2026-10-26，评审处置）
+
+- **F1 残留**：`commitSentence` 半句修正分支回写转录但不喂 `recentLines` → 此后精修替换匹配必失败、AI 快答停在旧半句。修：新增 `replaceRecentSuffix(old,new)` helper，半句修正与 `applyRefined` 替换分支共用。
+- **F2 残留**：停止时 `submit{}.get(2500ms)` 固定上限在精修队列积压时截断尾段。修：等待按 `(队列余量*2000).coerceIn(2500,15000)` 动态放宽（`stopDrainWaitMs` 字段），`stopRecording` 的 `stopSelf` 延迟按 `((余量+1)*2000).coerceIn(2800,15300)` 对齐。**行为变化**：队列积压时停止后通知栏多停留数秒（排空在真实落盘，属预期）。
+- **核对不成立**（勿再当 bug 修）：`recentNorm` 无跨线程访问（三引擎 ingest 全经 mainHandler.post）；LLM 超时已配（connect 15s/read timeoutMs）；停止排空无死锁（`.get` 在录音线程）。
+- **暂缓重构**（留档）：Line ID 精确替换、磁盘 I/O 移出主线程 + 行偏移 O(1) 覆写、`TranscriptBufferManager` 抽取 + JUnit。
 
 ### v0.10.5（2026-10-07，AI 快答/落盘及时性）
 

@@ -105,6 +105,8 @@ class RecorderService : Service() {
      * 自然覆盖队列余量。
      */
     private val refineQueue = ArrayDeque<FloatArray>()
+    /** 录音线程收尾时实际采用的精修排空等待上限（供 stopRecording 对齐 stopSelf 延迟；诊断观察用） */
+    @Volatile private var stopDrainWaitMs: Long = 2500
     /** onDestroy 后置位：精修引擎异步初始化回主线程时若服务已销毁，直接释放，避免 native 泄漏 */
     @Volatile private var destroyed = false
 
@@ -126,6 +128,21 @@ class RecorderService : Service() {
         synchronized(recentLines) {
             recentLines.addLast(RecentLine(System.currentTimeMillis(), line))
             while (recentLines.size > 600) recentLines.removeFirst()
+        }
+    }
+
+    /** 把 recentLines 中以 old 结尾的最新条目改写为 new（保留时间戳前缀与入队时刻）。
+     *  流式半句修正与精修替换共用；匹配不到则静默跳过（条目已被滑窗挤出等场景）。 */
+    private fun replaceRecentSuffix(old: String, new: String) {
+        synchronized(recentLines) {
+            // java.util.ArrayDeque 无索引访问，快照-改-回写
+            val snapshot = recentLines.toMutableList()
+            val idx = snapshot.indexOfLast { it.line.endsWith(old) }
+            if (idx >= 0) {
+                snapshot[idx] = RecentLine(snapshot[idx].at, snapshot[idx].line.dropLast(old.length) + new)
+                recentLines.clear()
+                recentLines.addAll(snapshot)
+            }
         }
     }
     private var dangerKeywords: List<String> = emptyList()
@@ -182,6 +199,8 @@ class RecorderService : Service() {
             (s.startsWith(prev) || (prev.startsWith(s) && s.length < prev.length))
         ) {
             replaceLastTranscriptLine(prev, s)
+            // recentLines 同步改写，否则 AI 快答读到的是修正前的旧半句（v0.10.6）
+            replaceRecentSuffix(prev, s)
             lastCommitted = s
             lastCommittedWasClosed = isClosedSentence(s)
             emit("sentence_corrected", s, prev)
@@ -506,8 +525,12 @@ class RecorderService : Service() {
             // 否则同一次 App 会话内再次开始会复用到"死引擎"（feedPcm 空跑，无字幕无报错）
             try { asrEngine?.release() } catch (_: Exception) {}
             asrEngine = null
-            // 等在跑的精修结束（有界等待），避免最后几句被 onDestroy 的 shutdownNow 打断而丢失
-            try { refineExecutor.submit { }.get(2500, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: Exception) {}
+            // 等在跑的精修结束（有界等待，按队列余量动态放宽），避免最后几句被 onDestroy 的 shutdownNow 打断而丢失。
+            // 哨兵任务排在排空任务之后，get 等到的即"队列全部消化完"或超时。
+            // 单段精修在中低端机可达秒级，固定 2500ms 在队列积压时必截断尾段（v0.10.6）
+            val drainWaitMs = (synchronized(refineQueue) { refineQueue.size } * 2000L).coerceIn(2500L, 15_000L)
+            stopDrainWaitMs = drainWaitMs
+            try { refineExecutor.submit { }.get(drainWaitMs, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: Exception) {}
             // 收尾落盘放主线程：保证 finish 冲刷出的最后一句话（同样 post 到主线程）先落盘，再写结束标记
             mainHandler.post {
                 flushTranscript()
@@ -666,17 +689,7 @@ class RecorderService : Service() {
         // 走到这里 replaceable==true，prev 必非空（?: 仅为空安全收窄，不会触发）
         val old = prev ?: return
         replaceLastTranscriptLine(old, s)
-        // 替换分支同步修 recentLines 里的旧流式文本，AI 快答读到的是精修后的内容
-        // （java.util.ArrayDeque 无索引访问，快照-改-回写）
-        synchronized(recentLines) {
-            val snapshot = recentLines.toMutableList()
-            val idx = snapshot.indexOfLast { it.line.endsWith(old) }
-            if (idx >= 0) {
-                snapshot[idx] = RecentLine(snapshot[idx].at, snapshot[idx].line.dropLast(old.length) + s)
-                recentLines.clear()
-                recentLines.addAll(snapshot)
-            }
-        }
+        replaceRecentSuffix(old, s)
         lastCommitted = s
         lastCommittedWasClosed = true
         Log.i(TAG, "精修替换: $old → $s")
@@ -815,11 +828,15 @@ class RecorderService : Service() {
         }
         // 让录音线程自然收尾：冲刷最后半句 + 写结束标记 + finalize WAV
         stopRequested.set(true)
+        // 排空等待上限与录音线程对齐：按当前队列余量估算（+1 段余量防竞态），
+        // 旧固定 2800ms 在队列积压时会提前 onDestroy 打断排空丢尾段（v0.10.6）
+        val queued = synchronized(refineQueue) { refineQueue.size }
+        val waitMs = ((queued + 1) * 2000L).coerceIn(2800L, 15_300L)
         mainHandler.postDelayed({
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
-        // 延迟需大于录音线程里"等精修排空"的上限(2500ms)，否则 onDestroy 的 shutdownNow 仍会打断收尾
-        }, 2800)
+        // 延迟需大于录音线程里"等精修排空"的上限（stopDrainWaitMs），否则 shutdownNow 仍会打断收尾
+        }, waitMs)
     }
 
     private fun intLE(v: Int): ByteArray = byteArrayOf(
