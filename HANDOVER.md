@@ -8,7 +8,15 @@
 
 ## 0. 一句话状态
 
-**v0.10.6（2026-10-26）：Argon 评审处置——F1 残留修复（激进模式半句修正分支漏喂 `recentLines`，AI 快答读到旧半句）+ F2 残留修复（停止时精修排空等待按队列余量动态放宽 2.5~15s，`stopSelf` 延迟对齐，队列积压不再截断尾段）；`recentNorm` 竞态与 LLM 超时两项指控经核对不成立（ingest 全部在主线程/超时早已配置），死锁指控不成立（`.get` 在录音线程）。逐条核对与暂缓重构清单见 `docs/评审_Argon意见处置_2026-10-26.md`。compileDebugKotlin 已验证，未做运行测试（等用户真机回归）。**
+**v0.10.7（2026-10-26）：DiagAsrReceiver 新增 `toservice` 注入模式（WAV PCM → 运行中服务的真实 processChunk 链路），用于在无麦克风的模拟器上端到端验证服务逻辑。实测两连：①保守模式注入 90s 真实课堂音频 → 精修补录 13 句 → AI 救场"老师原话"为精修句（v0.10.5-F1 服务路径闭环）；②注入中途停止 → 首跑踩出注入线程与停止拆解的竞态（asrEngine release vs native feedPcm → SIGSEGV），已修（diagFeedLock 全覆盖 + diagFeedPcm 响应 stopRequested + stopSelf 改条件轮询"队列空且无在跑任务"30s 上限），复跑无崩溃、停止后 1.5s 干净收尾。注意：模拟器上注入（~2x 实时）慢于精修引擎（~5x 实时），深积压场景无法在模拟器复现，队列满丢最旧/积压排空靠条件轮询的结构保证。**
+
+### v0.10.7（2026-10-26，WAV 注入测试钩子）
+
+- **DiagAsrReceiver**：`--ei toservice 1`（配合 `--es wav`，忽略 stream/refine）——把 WAV 块喂给 `RecorderService.diagService.diagFeedPcm()`；用法同诊断广播（app 须在监听中）。
+- **RecorderService**：`diagService` 静态钩子（onCreate 挂/onDestroy 卸）；`diagFeedPcm` 与麦克风读取、停止拆解三方经 `diagFeedLock` 互斥；`stopRequested` 后拒绝注入。
+- **停止收尾 v2**：`stopRecording` 由固定延迟改条件轮询（1s 间隔，`refineBusy==false && 队列空` 或 30s 硬上限才 stopSelf）——onDestroy 的 shutdownNow 永不打断 native transcribe（v0.10.6 的固定上限在深积压下仍有截断窗口，本版根治）。
+- **实测**（实例3，v0.10.7）：测试①保守模式注入→补录→AI 救场内容 ✓（截图存 D:\tmp\asr_task\ai3.png）；测试②注入中途停止：竞态首跑 SIGSEGV → 修复后复跑干净收尾 ✓；注入 30s 后停止 → 队列未积压（引擎快于注入），2.7s 收尾 ✓。
+- **待真机回归**（v0.10.5/0.10.6 遗留项不变）：真实施讲下 AI 快答、连续讲课停止尾段完整、logcat 无"精修忙，丢弃一段"。
 
 ### v0.10.6（2026-10-26，评审处置）
 

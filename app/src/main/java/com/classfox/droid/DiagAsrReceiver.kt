@@ -48,6 +48,7 @@ class DiagAsrReceiver : BroadcastReceiver() {
         val mode = i.getIntExtra("mode", SentenceSplitter.MODE_MERGE_CONSERVATIVE)
         val doRefine = i.getIntExtra("refine", 1) == 1
         val doStream = i.getIntExtra("stream", 1) == 1
+        val toService = i.getIntExtra("toservice", 0) == 1
         val vadSil = i.getFloatExtra("vadsil", 0.75f)
         val vadThr = i.getFloatExtra("vadthr", 0.5f)
         busy = true
@@ -64,6 +65,24 @@ class DiagAsrReceiver : BroadcastReceiver() {
                 val dataOff = header.first
                 val frames = ((wav.length() - dataOff) / 2).toInt()
                 sb.appendLine("=== silence=$silence mode=$mode vadsil=$vadSil vadthr=$vadThr 音频=${frames / TARGET_RATE}s ===")
+
+                if (toService) {
+                    // toservice 模式：不经独立引擎，把 PCM 喂进运行中 RecorderService 的
+                    // 真实链路（WAV 写盘→流式→分句落盘→VAD 精修队列→recentLines），
+                    // 用于端到端验证服务逻辑。需 app 已在监听中（running）。
+                    val svc = RecorderService.diagService
+                    if (svc == null) {
+                        sb.appendLine("[注入] 服务未运行（RecorderService.diagService 为空）")
+                    } else {
+                        var fed = 0L
+                        feedBlocks(wav, dataOff, frames) { shorts, n, _ ->
+                            if (svc.diagFeedPcm(shorts, n)) fed += n
+                        }
+                        sb.appendLine("[注入] 已喂入 ${fed / TARGET_RATE}s PCM（被拒块=服务未运行/已暂停）")
+                    }
+                    write(outPath, sb.toString())
+                    return@Thread
+                }
 
                 if (doStream) {
                     val splitter = SentenceSplitter(mode)

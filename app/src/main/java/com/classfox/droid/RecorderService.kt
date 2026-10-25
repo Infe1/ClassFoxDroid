@@ -42,6 +42,8 @@ class RecorderService : Service() {
 
     companion object {
         private const val TAG = "ClassFoxRec"
+        /** 运行中的服务实例（仅供 DiagAsrReceiver 的 WAV→服务链路注入使用；onCreate 挂载/onDestroy 卸载） */
+        @Volatile internal var diagService: RecorderService? = null
         const val CHANNEL_ID = "classfox_rec"
         const val NOTIF_ID = 1001
         const val ACTION_STOP = "com.classfox.droid.STOP"
@@ -105,6 +107,28 @@ class RecorderService : Service() {
      * 自然覆盖队列余量。
      */
     private val refineQueue = ArrayDeque<FloatArray>()
+    /** 诊断注入与麦克风读取的互斥锁 + 占用标志（见录音线程循环） */
+    private val diagFeedLock = Any()
+    @Volatile private var diagFeeding = false
+
+    /** 诊断注入入口（仅 DiagAsrReceiver toservice 模式）：把外部 WAV PCM 喂进与真实麦克风
+     *  完全相同的 processChunk 链路（WAV 写盘 → 流式 ASR → 分句落盘 → VAD 精修队列）。
+     *  与停止拆解（asrEngine finish/release）经 diagFeedLock 互斥——否则注入线程正在
+     *  native feedPcm 时引擎被释放会 SIGSEGV（v0.10.7 实测踩雷）；停止后拒绝新块。 */
+    fun diagFeedPcm(buf: ShortArray, n: Int): Boolean {
+        if (!running.get() || paused.get() || stopRequested.get()) return false
+        synchronized(diagFeedLock) {
+            if (!running.get() || paused.get() || stopRequested.get()) return false
+            diagFeeding = true
+            try {
+                processChunk(buf, n)
+            } finally {
+                diagFeeding = false
+            }
+        }
+        return true
+    }
+
     /** 录音线程收尾时实际采用的精修排空等待上限（供 stopRecording 对齐 stopSelf 延迟；诊断观察用） */
     @Volatile private var stopDrainWaitMs: Long = 2500
     /** onDestroy 后置位：精修引擎异步初始化回主线程时若服务已销毁，直接释放，避免 native 泄漏 */
@@ -330,6 +354,7 @@ class RecorderService : Service() {
     // ---------- 生命周期 ----------
     override fun onCreate() {
         super.onCreate()
+        diagService = this
         createChannel()
         reloadKeywords()
         voiceThresholdDb = Prefs.get(this).getInt(Prefs.KEY_THRESHOLD, -30).toDouble()
@@ -371,6 +396,7 @@ class RecorderService : Service() {
     override fun onDestroy() {
         destroyed = true
         running.set(false)
+        if (diagService === this) diagService = null
         try { mockEngine?.stop() } catch (_: Exception) {}
         try { systemEngine?.stop() } catch (_: Exception) {}
         try { asrEngine?.release() } catch (_: Exception) {}
@@ -514,17 +540,26 @@ class RecorderService : Service() {
             Log.i(TAG, "录音开始 course=$courseName")
             while (!stopRequested.get()) {
                 val n = rec.read(buf, 0, buf.size)
-                if (n > 0 && !paused.get()) processChunk(buf, n)
+                if (n > 0 && !paused.get()) {
+                    // 与诊断注入（diagFeedPcm）互斥：同一时刻只允许一路喂 processChunk，
+                    // 否则 ASR 引擎 feedPcm 与 WAV 写入会被两个线程交错
+                    synchronized(diagFeedLock) {
+                        if (!diagFeeding) processChunk(buf, n)
+                    }
+                }
             }
             rec.stop()
             rec.release()
             mockEngine?.stop(); mockEngine = null
             systemEngine?.stop(); systemEngine = null
-            asrEngine?.finish()
-            // 引擎 finish 后内部 running=false 不可逆：必须释放并置 null，
-            // 否则同一次 App 会话内再次开始会复用到"死引擎"（feedPcm 空跑，无字幕无报错）
-            try { asrEngine?.release() } catch (_: Exception) {}
-            asrEngine = null
+            // 与诊断注入互斥：注入线程可能正在 native feedPcm，直接 finish/release 会 SIGSEGV
+            synchronized(diagFeedLock) {
+                asrEngine?.finish()
+                // 引擎 finish 后内部 running=false 不可逆：必须释放并置 null，
+                // 否则同一次 App 会话内再次开始会复用到"死引擎"（feedPcm 空跑，无字幕无报错）
+                try { asrEngine?.release() } catch (_: Exception) {}
+                asrEngine = null
+            }
             // 等在跑的精修结束（有界等待，按队列余量动态放宽），避免最后几句被 onDestroy 的 shutdownNow 打断而丢失。
             // 哨兵任务排在排空任务之后，get 等到的即"队列全部消化完"或超时。
             // 单段精修在中低端机可达秒级，固定 2500ms 在队列积压时必截断尾段（v0.10.6）
@@ -828,15 +863,23 @@ class RecorderService : Service() {
         }
         // 让录音线程自然收尾：冲刷最后半句 + 写结束标记 + finalize WAV
         stopRequested.set(true)
-        // 排空等待上限与录音线程对齐：按当前队列余量估算（+1 段余量防竞态），
-        // 旧固定 2800ms 在队列积压时会提前 onDestroy 打断排空丢尾段（v0.10.6）
-        val queued = synchronized(refineQueue) { refineQueue.size }
-        val waitMs = ((queued + 1) * 2000L).coerceIn(2800L, 15_300L)
-        mainHandler.postDelayed({
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
-        // 延迟需大于录音线程里"等精修排空"的上限（stopDrainWaitMs），否则 shutdownNow 仍会打断收尾
-        }, waitMs)
+        // 排空等待：每秒轮询"精修队列空且无在跑任务"，满足（或 30s 硬上限）才 stopSelf。
+        // 旧固定延迟（2800ms→v0.10.6 动态上限 15.3s）在积压/注入场景会提前 onDestroy，
+        // shutdownNow 打断 native transcribe；改为条件轮询后收尾必然在排空之后（v0.10.7）
+        val stopPoll = object : Runnable {
+            var waited = 0L
+            override fun run() {
+                val busy = refineBusy.get() || synchronized(refineQueue) { refineQueue.isNotEmpty() }
+                if (busy && waited < 30_000L) {
+                    waited += 1000L
+                    mainHandler.postDelayed(this, 1000L)
+                } else {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                }
+            }
+        }
+        mainHandler.postDelayed(stopPoll, 1000L)
     }
 
     private fun intLE(v: Int): ByteArray = byteArrayOf(
