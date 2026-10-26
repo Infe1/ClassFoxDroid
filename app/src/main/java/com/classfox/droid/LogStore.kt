@@ -89,13 +89,18 @@ object LogStore {
             typeface = android.graphics.Typeface.MONOSPACE
             setTextIsSelectable(true)
         }
-        // 包一层 ScrollView 并在填充后直接落到最底部：最新日志在最后，免长按翻找
-        val scroll = android.widget.ScrollView(activity).apply { addView(tv) }
+        // 包一层 CaptionScrollView（fling 加速，长日志一甩大半屏）并在填充后直接落到最底部：
+        // 最新日志在最后，免长按翻找
+        val scroll = CaptionScrollView(activity).apply { addView(tv) }
         com.google.android.material.dialog.MaterialAlertDialogBuilder(activity)
             .setTitle("今日日志（$day）")
             .setView(scroll)
             .setPositiveButton("关闭", null)
             .show()
+            .window?.setLayout(
+                android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                (activity.resources.displayMetrics.heightPixels * 0.8).toInt()
+            )
         tv.text = content
         scroll.post { scroll.fullScroll(android.view.View.FOCUS_DOWN) }
     }

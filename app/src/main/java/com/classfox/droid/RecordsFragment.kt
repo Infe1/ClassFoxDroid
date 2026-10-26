@@ -197,11 +197,17 @@ class RecordsFragment : Fragment() {
             setTextColor(ContextCompat.getColor(ctx, R.color.cf_text_dim))
             text = "正在生成课堂笔记…（长转录约需几十秒，请勿关闭）"
         }
+        // 生成完成后 progress 会被整篇长笔记替换：必须包可滚容器（fling 加速）
+        val scroll = CaptionScrollView(ctx).apply { addView(progress) }
         val dlg = MaterialAlertDialogBuilder(ctx)
             .setTitle("AI 课堂笔记")
-            .setView(progress)
+            .setView(scroll)
             .setNegativeButton("取消", null)
             .show()
+        dlg.window?.setLayout(
+            android.view.WindowManager.LayoutParams.MATCH_PARENT,
+            (resources.displayMetrics.heightPixels * 0.8).toInt()
+        )
         // 取消标记：用户关掉对话框后，后台线程不再写文件/刷 UI
         val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
         dlg.setOnDismissListener { cancelled.set(true) }

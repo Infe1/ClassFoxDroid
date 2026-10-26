@@ -23,7 +23,7 @@
         android:textColor="@color/cf_text_dim"
         android:textSize="12sp" />
 
-    <ScrollView
+    <com.classfox.droid.CaptionScrollView
         android:id="@+id/aiScroll"
         android:layout_width="match_parent"
         android:layout_height="340dp"
@@ -37,7 +37,7 @@
             android:textColor="@color/cf_text"
             android:textIsSelectable="true"
             android:textSize="14sp" />
-    </ScrollView>
+    </com.classfox.droid.CaptionScrollView>
 
     <LinearLayout
         android:layout_width="match_parent"
