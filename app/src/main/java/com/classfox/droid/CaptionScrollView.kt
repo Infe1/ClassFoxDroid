@@ -34,4 +34,10 @@ class CaptionScrollView @JvmOverloads constructor(
         }
         return super.onTouchEvent(ev)
     }
+
+    /** 滑动加速度（用户反馈：长转录"划不动"——默认 fling 摩擦太大，一甩走不了多远）：
+     *  初速度放大 2.2 倍，长文本一甩能走大半屏；监听页字幕回看与转录对话框共用本类。 */
+    override fun fling(velocityY: Int) {
+        super.fling((velocityY * 2.2f).toInt())
+    }
 }

@@ -169,12 +169,19 @@ class RecordsFragment : Fragment() {
             text = content
             setTextIsSelectable(true)
         }
+        // 旧实现把 TextView 直接当对话框 view——没有滚动容器，长转录只能看第一屏（"划不动"）。
+        // CaptionScrollView 自带父级不拦截 + fling 加速，长文本一甩大半屏。
+        val scroll = CaptionScrollView(requireContext()).apply { addView(tv) }
         MaterialAlertDialogBuilder(requireContext())
             .setTitle(f.name)
-            .setView(tv)
+            .setView(scroll)
             .setPositiveButton("关闭", null)
             .setNeutralButton("AI 总结") { _, _ -> aiSummarize(f) }
             .show()
+            .window?.setLayout(
+                android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                (resources.displayMetrics.heightPixels * 0.8).toInt()
+            )
     }
 
     /**

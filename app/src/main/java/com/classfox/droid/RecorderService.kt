@@ -492,6 +492,11 @@ class RecorderService : Service() {
         running.set(true)
         startedAt = System.currentTimeMillis()
         tbuf.clearAll()
+        // 转录文件每场一换（与 wav 同策略）：跨场不清会把新一场——甚至另一门课——
+        // 的内容追加进上一场的文件（10-26 实测事故：离散+计组混入同一文件）。
+        // 旧行为"同日同课续写同一文件"自 v0.11.1 起废弃，改为一场一文件。
+        transcriptFile = null
+        lastLineInfo = null
         prepareWavFile()
         // 清掉上一场可能残留在 VAD 里的尾音，避免污染新一场的精修分段
         try { refineEngine?.flushPending() } catch (_: Exception) {}

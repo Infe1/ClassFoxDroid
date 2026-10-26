@@ -8,7 +8,13 @@
 
 ## 0. 一句话状态
 
-**v0.11.0（2026-10-26）：Argon S1/S2/S3 重构落地——①新增 `TranscriptBufferManager`（纯 Kotlin 可 JUnit，收敛 recentLines+行id/recentNorm/lastCommitted），11 个单测全过锁定近重复/窗口/半句修正/精修替换行为；②精修替换按行 id 精确改写（后缀匹配降为兜底）；③转录磁盘 I/O 全部移出主线程（`transcriptExecutor` 单写者），末行替换 O(1) RandomAccessFile seek 覆写，停止轮询条件扩展"落盘收尾完成"。行为/接口/文件格式零变化。实例3 注入回归三场景全过（保守 AI 救场/中途停止/激进精修替换 O(1) 快路径实跑）。详见 `docs/重构_v0.11.0_2026-10-26.md`。**
+**v0.11.1（2026-10-27）：①修复跨场跨课程复用（10-26 实测事故：服务进程存活时离散+计组 747 句混入同一转录文件）——`startRecording` 重置 `transcriptFile`/`lastLineInfo`，转录文件每场一换（与 wav 同策略；旧"同日同课续写"决策自本版废弃）；②转录浏览修复——`showTranscript` 旧实现把 TextView 直接塞进对话框（无滚动容器，长转录只能看第一屏），改为 CaptionScrollView 容器 + 对话框高 80% 屏 + `fling` 初速度 2.2 倍（监听页字幕回看共用）。实例3 验证：对话框一甩到底 ✓；注入冒烟→新会话新转录文件、7 句补录落盘、零错误 ✓。**
+
+### v0.11.1（2026-10-27，跨场复用修复 + 转录浏览）
+
+- RecorderService.startRecording：`transcriptFile = null; lastLineInfo = null`（每场新文件；末行偏移同步失效）。
+- CaptionScrollView：`override fun fling(velocityY)` 乘 2.2——字幕回看与转录对话框共用。
+- RecordsFragment.showTranscript：TextView 包进 CaptionScrollView，`window.setLayout(MATCH_PARENT, 0.8*屏高)`。
 
 ### v0.11.0（2026-10-26，S1+S2+S3 重构）
 
