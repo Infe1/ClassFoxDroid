@@ -230,10 +230,9 @@ class RecordsFragment : Fragment() {
                 out.writeText(note)
                 activity?.runOnUiThread {
                     if (_b == null) return@runOnUiThread
-                    progress.text = note
-                    progress.typeface = android.graphics.Typeface.MONOSPACE
                     progress.setTextColor(ContextCompat.getColor(ctx, R.color.cf_text))
-                    progress.setTextIsSelectable(true)
+                    // Markdown + LaTeX 渲染（与 AI 问答同一渲染管线）
+                    AiRender.render(progress, note)
                     reload()
                     Toast.makeText(ctx, "已保存：${out.name}", Toast.LENGTH_SHORT).show()
                 }

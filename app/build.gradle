@@ -11,8 +11,8 @@ android {
         applicationId "com.classfox.mobile.clean"
         minSdk 26
         targetSdk 34
-        versionCode 26
-        versionName "0.11.2"
+        versionCode 27
+        versionName "0.11.3"
     }
 
     buildTypes {
@@ -41,6 +41,11 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
     // 端侧离线 ASR:纯 Java API 类;安卓 .so 走本地 jniLibs(不入桌面 native)
     implementation('com.github.k2-fsa.sherpa-onnx:sherpa-onnx-jvm:v1.13.7')
+    // AI 问答 Markdown + LaTeX 公式渲染（离线 span 渲染；ext-latex 内置 JLatexMath，
+    // 支持 $$..$$ 块级与 $..$ 行内，\[..\]/\(..\) 由 AiRender 预处理转换）
+    implementation 'io.noties.markwon:core:4.6.2'
+    implementation 'io.noties.markwon:ext-latex:4.6.2'
+    implementation 'io.noties.markwon:ext-tables:4.6.2'
     // TranscriptBufferManager 行为锁单测（纯 JVM）
     testImplementation 'junit:junit:4.13.2'
 }

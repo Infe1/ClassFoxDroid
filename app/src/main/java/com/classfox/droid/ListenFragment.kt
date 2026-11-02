@@ -366,7 +366,8 @@ class ListenFragment : Fragment() {
         act.runOnUiThread {
             if (_b == null || aiSheet == null) return@runOnUiThread
             if (bodyText.isNotEmpty()) {
-                aiBody?.text = bodyText
+                // Markdown + LaTeX（$..$ / $$..$$ / \[..\] / \(..\)）离线渲染（v0.11.3）
+                aiBody?.let { AiRender.render(it, bodyText) }
                 aiStatus?.text = ""
                 aiBody?.post {
                     (aiBody?.parent as? android.widget.ScrollView)?.fullScroll(View.FOCUS_DOWN)
