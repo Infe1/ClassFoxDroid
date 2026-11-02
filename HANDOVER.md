@@ -8,7 +8,16 @@
 
 ## 0. 一句话状态
 
-**v0.11.1（2026-10-27）：①修复跨场跨课程复用（10-26 实测事故：服务进程存活时离散+计组 747 句混入同一转录文件）——`startRecording` 重置 `transcriptFile`/`lastLineInfo`，转录文件每场一换（与 wav 同策略；旧"同日同课续写"决策自本版废弃）；②转录浏览修复——`showTranscript` 旧实现把 TextView 直接塞进对话框（无滚动容器，长转录只能看第一屏），改为 CaptionScrollView 容器 + 对话框高 80% 屏 + `fling` 初速度 2.2 倍（监听页字幕回看共用）。实例3 验证：对话框一甩到底 ✓；注入冒烟→新会话新转录文件、7 句补录落盘、零错误 ✓。**
+**v0.11.3（2026-11-03）：AI 问答 Markdown + LaTeX 公式渲染——新增 `AiRender`（Markwon span 渲染，离线可用不引 WebView；ext-latex/JLatexMath 支持 `$..$` 与 `$$..$$`，`\[..\]`/`\(..\)` 由 normalizeLatex 预处理转换；坏公式透明占位、整体异常退回纯文本并记日志）；AI 救场面板与 AI 总结展示两处接入。**踩坑**：JLatexMathPlugin **硬依赖 MarkwonInlineParserPlugin**（configure 时 registry.require，不注册 Markwon.build() 直接抛 → 被兜底吞成纯文本），必须先注册。实例3 实测：粗体/列表/表格/LaTeX 块级公式（分式/根号/上下标）渲染全过。**
+
+### v0.11.3（2026-11-03，AI 输出 Markdown+公式渲染）
+
+- 新依赖：`io.noties.markwon:core/ext-latex/ext-tables:4.6.2`（ext-latex 传递依赖 `ru.noties:jlatexmath-android:0.2.0`）。
+- `AiRender.kt`（新文件）：`render(tv, raw)` = normalizeLatex → `markwon.setMarkdown`；markwon 单例按首次调用者 textSize 构建；**注册顺序**：MarkwonInlineParserPlugin → TablePlugin → JLatexMathPlugin（`inlinesEnabled(true)` 必须显式开，默认关；`JLatexMathPlugin.create(Config)` 两段式 API——builder.build() 返回 Config 不是插件）。
+- 接入点：ListenFragment.postAi（AI 救场/讲到哪了回答）+ RecordsFragment.aiSummarize 完成展示（AI 课堂笔记）。转录/总结 md 文件本身仍是 Markdown 原文存盘，渲染只在展示层。
+- 实例3 实测截图：D:\tmp\asr_task\m2.png（粗体/列表）、m3.png（表格 + LaTeX 块级公式排版正确）。
+
+### v0.11.2（2026-10-27，长文阅读滑动优化全覆盖，见 commit ad400f6）
 
 ### v0.11.1（2026-10-27，跨场复用修复 + 转录浏览）
 
